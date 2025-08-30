@@ -299,13 +299,19 @@ def main():
     text_chunks = get_text_chunks(args)
     total_chars = sum(len(c) for c in text_chunks)
     print(f"Generating {len(text_chunks)} chunks ({total_chars} chars)")
+    # Show preview of the first chunk before processing
+    if text_chunks:
+        preview = text_chunks[0][:30].replace("\n", " ")
+        print(f"Chunk 1/{len(text_chunks)}: '{preview}...'")
 
     tts = ChatterboxTTS.from_pretrained(device=device)
 
     audio_chunks = []
     for i, chunk in enumerate(text_chunks, 1):
-        preview = chunk[:30].replace("\n", " ")
-        print(f"Chunk {i}/{len(text_chunks)}: '{preview}...'")
+        # Preview remaining chunks starting from the second
+        if i > 1:
+            preview = chunk[:30].replace("\n", " ")
+            print(f"Chunk {i}/{len(text_chunks)}: '{preview}...'")
         wav = tts.generate(
             chunk,
             audio_prompt_path=str(args.audio_sample),
