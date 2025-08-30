@@ -1,6 +1,7 @@
 # Birdler
 
-# Birdler is a simple command-line voice cloning tool built on top of ChatterboxTTS.  
+# Birdler is a simple command-line voice cloning tool built on top of ChatterboxTTS.
+
 It lets you generate expressive, characterful speech by providing a short reference
 audio sample (the “voice prompt”), customizable generation parameters, and optional
 text input (from a file or direct string).
@@ -17,11 +18,13 @@ text input (from a file or direct string).
 ## Installation
 
 Make sure you have Python 3.8+ and install dependencies:
+
 ```bash
 pip install torch torchaudio chatterbox-tts
 ```
 
 For YouTube audio extraction (optional feature), install `yt-dlp` (and ensure `ffmpeg` is on your PATH):
+
 ```bash
 pip install yt-dlp    # or youtube-dl
 ```
@@ -93,5 +96,4 @@ ChatterboxTTS API directly for more advanced workflows.
 
 ## License
 
-This project follows the license of the ChatterboxTTS framework and any
-third-party tools it uses.
+MIT License © Rob Banagale
