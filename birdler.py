@@ -15,6 +15,7 @@ import time
 import re
 from pathlib import Path
 from shutil import which
+from dotenv import load_dotenv; load_dotenv()
 
 
 def parse_args():

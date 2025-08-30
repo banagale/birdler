@@ -15,7 +15,7 @@ python = ">=3.12,<4.0"
 chatterbox-tts = "*"
 yt-dlp = {version = "*", optional = true}
 youtube-dl = {version = "*", optional = true}
-
+dotenv = "0.9.9"
 [tool.poetry.extras]
 youtube = ["yt-dlp", "youtube-dl"]
 
