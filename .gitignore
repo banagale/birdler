@@ -38,13 +38,23 @@ pip-wheel-metadata/
 # ---- Environment ----
 .env
 .envrc
-
+.DS_STORE
 # ---- Audio Files (for voice samples) ----
 # Keep empty dirs for audio-samples and generated-audio via .gitkeep files
 
 # ignore all files in generated-audio except .gitkeep
 /generated-audio/*
 !/generated-audio/.gitkeep
+
+# ignore all files in audio-samples except .gitkeep and specific sample dirs
+/audio-samples/*
+!/audio-samples/.gitkeep
+!/audio-samples/ripley/
+!/audio-samples/ripley/**
+!/audio-samples/rambo/
+!/audio-samples/rambo/**
+!/audio-samples/bigbird/
+!/audio-samples/bigbird/**
 
 voice_models/
 
