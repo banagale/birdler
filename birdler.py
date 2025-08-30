@@ -1,9 +1,12 @@
+#!/usr/bin/env python3
 """
 Birdler: command-line voice cloning tool using ChatterboxTTS.
-- Splits long input text into chunks.
-- Trims leading/trailing silence of each generated chunk.
-- Crossfades between chunks to avoid gaps.
-- Writes an output filename based on sample/text plus a Unix timestamp.
+- Dynamic, sentence-aware chunking:
+  * Soft target (--max-chars, default 280)
+  * Hard cap per chunk (--hard-max-chars, default 360) with safe fallback split
+- Trims leading/trailing silence per chunk
+- Crossfades between chunks
+- Timestamped, descriptive output filenames
 """
 import argparse
 import subprocess
@@ -78,6 +81,18 @@ def parse_args():
         type=str,
         help="Text string to synthesize directly (mutually exclusive with --text-file)",
     )
+    parser.add_argument(
+        "--max-chars",
+        type=int,
+        default=280,
+        help="Soft target characters per chunk (sentence-aware)",
+    )
+    parser.add_argument(
+        "--hard-max-chars",
+        type=int,
+        default=360,
+        help="Hard cap per chunk; overflow is forcibly split on whitespace",
+    )
     return parser.parse_args()
 
 
@@ -97,33 +112,88 @@ def select_device(preferred=None):
     return "cpu"
 
 
+DEFAULT_TEXT = (
+    "style is the answer to everything -- "
+    "a fresh way to approach a dull or a dangerous thing. "
+    "to do a dull thing with style is preferable to doing a dangerous thing without it."
+)
+
+
+def _normalize_whitespace(s: str) -> str:
+    return re.sub(r"\s+", " ", s.strip())
+
+
+def _split_into_sentences(text: str) -> list[str]:
+    # Simple sentence splitter on ., !, ? while keeping the delimiter.
+    # Falls back gracefully for short or delimiter-less inputs.
+    pieces = re.split(r"([.!?])", text)
+    if len(pieces) == 1:
+        return [text.strip()] if text.strip() else []
+    out = []
+    for i in range(0, len(pieces) - 1, 2):
+        sent = (pieces[i] + pieces[i + 1]).strip()
+        if sent:
+            out.append(sent)
+    # Append any trailing fragment
+    if len(pieces) % 2 == 1 and pieces[-1].strip():
+        out.append(pieces[-1].strip())
+    return out
+
+
+def _greedy_sentence_pack(sentences: list[str], max_chars: int, hard_max: int) -> list[str]:
+    """
+    Pack sentences into chunks aiming for max_chars. Enforce hard_max by whitespace split.
+    """
+    chunks = []
+    buf = ""
+    for s in sentences:
+        s_norm = _normalize_whitespace(s)
+        candidate = (buf + " " + s_norm).strip() if buf else s_norm
+        if len(candidate) <= max_chars:
+            buf = candidate
+            continue
+        # buf has content; flush it
+        if buf:
+            chunks.append(buf)
+            buf = s_norm
+        else:
+            # Single sentence too long; enforce hard split
+            buf = s_norm
+
+        # If current buffer exceeds hard_max, spill by whitespace
+        while len(buf) > hard_max:
+            cut = buf.rfind(" ", 0, hard_max)
+            cut = cut if cut != -1 else hard_max
+            chunks.append(buf[:cut].strip())
+            buf = buf[cut:].strip()
+    if buf:
+        chunks.append(buf)
+    return chunks
+
+
 def get_text_chunks(args):
     """
     Determine text chunks to synthesize based on args.
-    Supports default hardcoded chunks, or user-supplied --text-file or --text.
-    Splits long scripts into the same number of chunks as the default.
+    Sentence-aware packing with soft target (--max-chars) and hard cap (--hard-max-chars).
     """
-    # Safe-for-work default: opening stanzas of Bukowski's "Style" (short excerpt)
-    DEFAULT_TEXT_CHUNKS = [
-        "style is the answer to everything --",
-        "a fresh way to approach a dull or a dangerous thing.",
-        "to do a dull thing with style is preferable to doing a dangerous thing without it.",
-    ]
     if args.text_file or args.text:
-        if args.text_file:
-            script = args.text_file.read_text()
-        else:
-            script = args.text
-        chunk_count = len(DEFAULT_TEXT_CHUNKS)
-        max_def = max(len(c) for c in DEFAULT_TEXT_CHUNKS)
-        if len(script) > max_def:
-            print(f"Script length {len(script)} > {max_def}, splitting into {chunk_count} chunks")
-            size = len(script) // chunk_count
-            chunks = [script[i * size: (i + 1) * size] for i in range(chunk_count - 1)]
-            chunks.append(script[(chunk_count - 1) * size:])
-            return chunks
-        return [script]
-    return DEFAULT_TEXT_CHUNKS
+        script = args.text_file.read_text() if args.text_file else args.text
+        script = _normalize_whitespace(script)
+    else:
+        script = DEFAULT_TEXT
+
+    if not script:
+        return []
+
+    sentences = _split_into_sentences(script)
+    if not sentences:
+        # No punctuation; split by words
+        words = script.split()
+        sentences = [" ".join(words)] if len(words) <= args.max_chars else [" ".join(words)]
+
+    chunks = _greedy_sentence_pack(sentences, args.max_chars, args.hard_max_chars)
+    print(f"Dynamic chunking: {len(chunks)} chunks (len={len(script)} chars, target={args.max_chars}, hard={args.hard_max_chars})")
+    return chunks
 
 
 def _slugify_text(s: str, max_len: int = 40) -> str:
@@ -133,11 +203,9 @@ def _slugify_text(s: str, max_len: int = 40) -> str:
 
 
 def _derive_outname(args, text_chunks) -> str:
-    # sample slug
     sample_slug = (args.audio_sample.stem if args.audio_sample else "sample")
     sample_slug = _slugify_text(sample_slug, max_len=40)
 
-    # text slug preference: direct --text, then --text-file name, then first chunk
     if args.text:
         text_slug = _slugify_text(" ".join(args.text.split()[:6]), max_len=40)
     elif args.text_file:
@@ -152,18 +220,10 @@ def _derive_outname(args, text_chunks) -> str:
 
 def main():
     args = parse_args()
-    # Prompt if output directory does not exist
-    if not args.output_dir.exists():
-        create = input(f"Output directory {args.output_dir!r} does not exist. Create it? [y/N]: ")
-        if create.lower() not in ("y", "yes"):
-            print("Aborted.")
-            return 1
-        args.output_dir.mkdir(parents=True)
-
     device = select_device(args.device)
     print(f"Using device: {device}")
 
-    # YouTube extraction path
+    # YouTube extraction
     if args.youtube_url:
         ytdlp_cmd = which("yt-dlp") or which("youtube-dl")
         if not ytdlp_cmd:
@@ -179,21 +239,21 @@ def main():
         print("Done.")
         return 0
 
-    # TTS generation path
+    # TTS generation
     if not args.audio_sample or not args.audio_sample.exists():
         print(f"Error: audio sample not found: {args.audio_sample}")
         return 1
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Import heavy deps here
+    # Heavy deps
     import torch
     import torchaudio
     from chatterbox import ChatterboxTTS
 
     def trim_silence(wav: torch.Tensor, thresh: float = 1e-3) -> torch.Tensor:
         """
-        Trim leading and trailing regions where mean(|x|) <= thresh.
+        Trim leading/trailing regions where mean(|x|) <= thresh.
         wav shape: [C, T] or [T].
         """
         if wav.dim() == 1:
@@ -234,9 +294,10 @@ def main():
             out = torch.cat([out[:, :-f], blended, nxt[:, f:]], dim=1)
         return out
 
-    # Determine text chunks to synthesize
+    # Chunking
     text_chunks = get_text_chunks(args)
-    print(f"Generating {len(text_chunks)} chunks ({sum(len(c) for c in text_chunks)} chars)")
+    total_chars = sum(len(c) for c in text_chunks)
+    print(f"Generating {len(text_chunks)} chunks ({total_chars} chars)")
 
     tts = ChatterboxTTS.from_pretrained(device=device)
 
@@ -252,8 +313,15 @@ def main():
             temperature=args.temperature,
             repetition_penalty=args.repetition_penalty,
         )
-        # to float [-1, 1], [C, T]
-        if not torch.is_floating_point(wav):
+        # float [-1, 1], [C, T]
+        if not hasattr(wav, "dim"):
+            # Some APIs might return numpy; convert if needed
+            import numpy as np
+            if isinstance(wav, np.ndarray):
+                import torch as _torch
+                wav = _torch.from_numpy(wav)
+        import torch as _torch
+        if not _torch.is_floating_point(wav):
             wav = wav.float() / 32768.0
         if wav.dim() == 1:
             wav = wav.unsqueeze(0)
