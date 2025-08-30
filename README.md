@@ -2,7 +2,8 @@
 
 # Birdler is a simple command-line voice cloning tool built on top of ChatterboxTTS.  
 It lets you generate expressive, characterful speech by providing a short reference
-audio sample (the “voice prompt”) plus customizable generation parameters.
+audio sample (the “voice prompt”), customizable generation parameters, and optional
+text input (from a file or direct string).
 
 ## Features
 
@@ -10,6 +11,8 @@ audio sample (the “voice prompt”) plus customizable generation parameters.
 - Configurable **guidance scale**, **exaggeration**, **temperature**, and **repetition penalty**
 - Automatic device selection (CPU, CUDA, or Apple MPS)
 - Splits longer text into chunks, synthesizes each, then concatenates the final waveform
+- Custom text input via `--text-file` or `--text` to read a script from a file or
+  provide a direct text string
 
 ## Installation
 
