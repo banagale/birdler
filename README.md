@@ -1,0 +1,94 @@
+# Birdler
+
+# Birdler is a simple command-line voice cloning tool built on top of ChatterboxTTS.  
+It lets you generate expressive, characterful speech by providing a short reference
+audio sample (the “voice prompt”) plus customizable generation parameters.
+
+## Features
+
+- **Voice cloning** via a clean reference sample (your own data, character voices, etc.)
+- Configurable **guidance scale**, **exaggeration**, **temperature**, and **repetition penalty**
+- Automatic device selection (CPU, CUDA, or Apple MPS)
+- Splits longer text into chunks, synthesizes each, then concatenates the final waveform
+
+## Installation
+
+Make sure you have Python 3.8+ and install dependencies:
+```bash
+pip install torch torchaudio chatterbox-tts
+```
+
+For YouTube audio extraction (optional feature), install `yt-dlp` (and ensure `ffmpeg` is on your PATH):
+```bash
+pip install yt-dlp    # or youtube-dl
+```
+
+## Usage
+
+```bash
+python birdler.py \
+  --audio-sample /path/to/clean_sample.wav \
+  --output-dir generated-audio \
+  --cfg-weight 0.3 \
+  --exaggeration 0.8 \
+  --temperature 0.7 \
+  --repetition-penalty 1.1
+```
+
+### Synthesize from a text script file
+
+By default, `text-scripts/style-charles-bukowski.txt` is provided as a placeholder for Bukowski's poem
+Style (replace it with the full text if desired).
+
+```bash
+python birdler.py \
+  --text-file text-scripts/style-charles-bukowski.txt \
+  --output-dir generated-audio
+```
+
+### Synthesize from a direct text string
+
+```bash
+python birdler.py \
+  --text "Your custom text here" \
+  --output-dir generated-audio
+```
+
+### Extract audio from YouTube
+
+```bash
+python birdler.py \
+  --youtube-url 'https://www.youtube.com/watch?v=rkBhLjwuq20' \
+  --output-dir audio-samples
+```
+
+### Arguments
+
+- `--audio-sample`: Path to a clean WAV file that serves as the voice prompt.
+- `--youtube-url`: YouTube URL to extract audio from (requires yt-dlp or youtube-dl); if set, extracts audio and exits.
+- `--output-dir`: Directory where the generated WAV or extracted audio will be saved.
+- `--device`: Force a device (`cpu`, `cuda`, or `mps`); auto-detected if omitted.
+- `--cfg-weight`: Guidance scale (higher = more faithful to prompt).
+- `--exaggeration`: Expressiveness factor (higher = more dramatic).
+- `--temperature`: Sampling temperature (lower = more deterministic).
+- `--repetition-penalty`: Penalty to discourage stuttering.
+
+- `--text-file`: Path to a text file to synthesize (mutually exclusive with --text).
+- `--text`: Text string to synthesize directly (mutually exclusive with --text-file).
+
+Generated audio will be written as `generated-audio/bigbird_exhausting_week.wav` by default.
+
+## How it works
+
+1. **Load** a pretrained ChatterboxTTS model onto your chosen device.
+2. **Read** your reference sample and the text chunks (default or user-supplied script).
+3. **Generate** each chunk in turn using the provided TTS parameters.
+4. **Concatenate** the audio chunks and save the final waveform.
+
+This script is a quick demo harness—you can adapt the chunks or hook into the
+ChatterboxTTS API directly for more advanced workflows.
+
+## License
+
+This project follows the license of the ChatterboxTTS framework and any
+third-party tools it uses.

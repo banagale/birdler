@@ -1,0 +1,58 @@
+# ---- macOS System Files ----
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# ---- JetBrains / PyCharm ----
+.idea/
+*.iml
+*.pyo
+*.pyd
+venv/
+
+# ---- VS Code ----
+.vscode/
+*.code-workspace
+
+# ---- Python ----
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+*.sqlite3
+
+# ---- Poetry ----
+/.venv/
+
+# ---- Logs & Debugging ----
+*.log
+debug.log
+tmp/
+
+# ---- Build & Distribution ----
+dist/
+build/
+*.egg-info/
+pip-wheel-metadata/
+
+# ---- Environment ----
+.env
+.envrc
+
+# ---- Audio Files (for voice samples) ----
+# Keep empty dirs for audio-samples and generated-audio via .gitkeep files
+
+# ignore all files in generated-audio except .gitkeep
+/generated-audio/*
+!/generated-audio/.gitkeep
+
+voice_models/
+
+# ---- Large Model Files ----
+*.pt
+*.pth
+*.safetensors
+*.ckpt
+
+# ---- Test Output ----
+test_output/
