@@ -1,131 +1,76 @@
 # Birdler
 
-# Birdler is a simple command-line voice cloning tool built on top of ChatterboxTTS.
+Command-line voice cloning built on ChatterboxTTS, with managed voices, reproducible runs, parallel generation, and optional post‑processing.
 
-It lets you generate expressive, characterful speech by providing a short reference
-audio sample (the “voice prompt”), customizable generation parameters, and optional
-text input (from a file or direct string).
+## Quick Start
 
-## Features
+Install (Python 3.12+ recommended):
+- Using Poetry: `poetry install --with dev`
+- Or pip: `pip install chatterbox-tts torch torchaudio yt-dlp` (plus `ffmpeg` on PATH for media ops)
 
-- **Voice cloning** via a clean reference sample (your own data, character voices, etc.)
-- Configurable **guidance scale**, **exaggeration**, **temperature**, and **repetition penalty**
-- Automatic device selection (CPU, CUDA, or Apple MPS)
-- Splits longer text into chunks, synthesizes each, then concatenates the final waveform
-- Custom text input via `--text-file` or `--text` to read a script from a file or
-  provide a direct text string
-
-## Installation
-
-Make sure you have Python 3.12+ and install dependencies:
-
+Add a new voice from a clean WAV (builds and caches embedding):
 ```bash
-pip install torch torchaudio chatterbox-tts
+birdler --voice tuba   --audio-sample "/abs/path/to/tuba.wav"   --bootstrap-only --build-embedding
 ```
 
-For YouTube audio extraction (optional feature), install `yt-dlp` (and ensure `ffmpeg` is on your PATH):
-
+Synthesize a script (uses cached embedding):
 ```bash
-pip install yt-dlp    # or youtube-dl
+birdler --voice tuba   --text-file text-scripts/style-charles-bukowski.txt   --output-dir generated-audio
 ```
 
-## Usage (managed voices)
-
-First run bootstraps a voice directory and caches a speaker embedding:
-
+Bootstrap from YouTube, then build embedding after you edit `voices/<name>/samples/reference.wav`:
 ```bash
-python birdler.py \
-  --voice ripley \
-  --audio-sample audio-samples/ripley/aliens-ripley-scene-clip-clean.wav \
-  --text-file text-scripts/style-charles-bukowski.txt \
-  --output-dir generated-audio
+birdler --voice ripley --youtube-url 'https://youtu.be/xxx' --bootstrap-only
+birdler --voice ripley --bootstrap-only --build-embedding
 ```
 
-Subsequent runs can omit the sample and reuse the cached embedding:
-
+Expressive preset:
 ```bash
-python birdler.py --voice ripley --text "Another line" --output-dir generated-audio
-
-Bootstrap from YouTube directly into the managed voice (review/edit first):
-
-```bash
-python birdler.py \
-  --voice ripley \
-  --youtube-url 'https://www.youtube.com/watch?v=XXXX'
-
-# Optional: once you've cleaned voices/ripley/samples/reference.wav, cache embedding:
-python birdler.py --voice ripley --build-embedding --bootstrap-only
+birdler --voice tuba --text "Hello" --cfg-weight 0.3 --exaggeration 0.8 --temperature 0.7
 ```
 
-Re-run with any text once the embedding is cached:
-
+Deterministic run (seeded) and parallelism:
 ```bash
-python birdler.py --voice ripley --text "Get away from her, you..."
+birdler --voice tuba --text "Hello" --seed 123 --run-index 1   --workers 4 --n-candidates 2 --max-attempts 1
 ```
-```
 
-### Synthesize from a text script file
-
-By default, `text-scripts/style-charles-bukowski.txt` is provided as a placeholder for Bukowski's poem
-Style (replace it with the full text if desired).
-
+Optional post-processing:
 ```bash
-python birdler.py \
-  --text-file text-scripts/style-charles-bukowski.txt \
-  --output-dir generated-audio
+birdler --voice tuba --text "Hi" --denoise --auto-editor --normalize ebu
 ```
 
-### Synthesize from a direct text string
-
+Compat mode (no embedding; path-based prompting):
 ```bash
-python birdler.py \
-  --text "Your custom text here" \
-  --output-dir generated-audio
+birdler --voice tuba --compat-legacy-prompt --text "Hello"
 ```
 
-### Extract audio from YouTube
+## Key Concepts & Flags
 
-```bash
-python birdler.py \
-  --youtube-url 'https://www.youtube.com/watch?v=rkBhLjwuq20' \
-  --output-dir audio-samples
-```
+- Managed voices: `voices/<name>/{samples/reference.wav, embedding/cond.pt}`
+- Building embeddings: `--bootstrap-only --build-embedding` (first time); compat mode available.
+- Chunking: sentence-aware with soft/hard caps and minimum chunk length.
+- Parallel gen: `--workers`, `--n-candidates`, `--max-attempts`; deterministic seeds via `--seed`.
+- Validation & retry (experimental scaffold): `--validate`, `--validate-threshold`; retries missing chunks.
+- Post‑processing (optional): `--denoise` (RNNoise CLI), `--auto-editor`, `--normalize ebu|peak`.
+- Determinism: `--deterministic` enables deterministic algorithms; filenames include `_gen{N}` and optional `_seed{S}`.
+- Settings artifacts: writes `.settings.json` and `.settings.csv` next to the WAV (no raw text).
+- Progress: prints `[PROGRESS] N/M` and per-chunk previews.
 
-### Arguments
+Defaults (neutral): `--cfg-weight 0.5 --exaggeration 0.5 --temperature 0.8 --repetition-penalty 1.2`
 
-- `--voice`: Managed voice name stored under `voices/<name>` (required for TTS).
-- `--voice-dir`: Root directory for managed voices (default: `voices`).
-- `--audio-sample`: Reference WAV used only to bootstrap a new `--voice` on first run.
-- `--bootstrap-only`: Only set up the voice (download/copy + cache embedding), then exit.
-- `--force-voice-ref`: Overwrite an existing `voices/<name>/samples/reference.wav` during bootstrap.
-- `--youtube-url`: YouTube URL to extract audio from (requires yt-dlp or youtube-dl); if set, extracts audio and exits.
-- `--output-dir`: Directory where the generated WAV or extracted audio will be saved.
-- `--device`: Force a device (`cpu`, `cuda`, or `mps`); auto-detected (prefers `mps` on macOS, otherwise `cuda`).
-- `--cfg-weight`: Guidance scale (default 0.5; higher = more faithful to prompt).
-- `--exaggeration`: Expressiveness factor (default 0.5; higher = more dramatic).
-- `--temperature`: Sampling temperature (default 0.8; lower = more deterministic).
-- `--repetition-penalty`: (default 1.2) discourages stuttering.
+## Tips for Reference Clips
+- Use a clean, single‑speaker 5–15s clip (mono PCM WAV). Avoid music/SFX/reverb.
+- For YouTube, extract best audio, isolate the speaker in an editor, export mono WAV, then `--build-embedding`.
 
-- `--text-file`: Path to a text file to synthesize (mutually exclusive with --text).
-- `--text`: Text string to synthesize directly (mutually exclusive with --text-file).
+## Acknowledgements
+- ChatterboxTTS by Resemble AI powers synthesis and watermarks (Perth). Outputs include imperceptible watermarks.
+- This project incorporates ideas inspired by the Chatterbox‑TTS‑Extended work (parallelization, determinism, validation hooks).
 
-Generated audio will be written as `generated-audio/bigbird_exhausting_week.wav` by default.
-
-## How it works
-
-1. **Load** a pretrained ChatterboxTTS model onto your chosen device.
-2. **Manage voice data** under `voices/<name>/`: keep a clean `samples/reference.wav` and a cached `embedding/cond.pt`.
-3. **Condition** on the cached embedding and generate each text chunk with your TTS parameters.
-4. **Concatenate** the audio chunks with crossfades and save the waveform.
-
-This script is a quick demo harness—you can adapt the chunks or hook into the
-ChatterboxTTS API directly for more advanced workflows.
+## Troubleshooting
+- “Embedding not available”: run bootstrap with a clean WAV (`--build-embedding`) or use `--compat-legacy-prompt`.
+- Missing tools: `yt-dlp`, `ffmpeg`, `auto-editor`, `denoise` are optional; install for related features.
+- Device: prefers Apple `mps` on macOS, `cuda` on NVIDIA, else `cpu`.
 
 ## License
 
 MIT License © Rob Banagale
-- Watermark: outputs include imperceptible Perth watermarks per Chatterbox; see upstream docs for detection.
-
-### Presets
-- Neutral: `--cfg-weight 0.5 --exaggeration 0.5 --temperature 0.8`
-- Expressive: `--cfg-weight 0.3 --exaggeration 0.8 --temperature 0.7`
