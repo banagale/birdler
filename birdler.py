@@ -756,6 +756,11 @@ def main():
             audio_chunks.append(wav)
     else:
         for i, chunk in enumerate(text_chunks, 1):
+            try:
+                from progress import log_progress as _lp
+                _lp(i, len(text_chunks))
+            except Exception:
+                pass
             if i > 1:
                 preview = chunk[:30].replace("\n", " ")
                 print(f"Chunk {i}/{len(text_chunks)}: '{preview}...'")
