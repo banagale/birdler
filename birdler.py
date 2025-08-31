@@ -99,6 +99,15 @@ def parse_args():
         help="Enable deterministic algorithms where supported (may reduce speed)",
     )
     parser.add_argument(
+        "--workers", type=int, default=1, help="Number of parallel workers for chunk generation"
+    )
+    parser.add_argument(
+        "--n-candidates", type=int, default=1, help="Number of candidates per chunk"
+    )
+    parser.add_argument(
+        "--max-attempts", type=int, default=1, help="Max retries per chunk when validating"
+    )
+    parser.add_argument(
         "--bootstrap-only",
         action="store_true",
         help="Only set up the managed voice (download/copy + cache embedding), then exit",
@@ -656,6 +665,21 @@ def main():
         print(f"[voice] Bootstrap complete for '{args.voice}'.")
         return 0
 
+    def _process_wav(wav):
+        if not hasattr(wav, "dim"):
+            import numpy as np
+            if isinstance(wav, np.ndarray):
+                import torch as _torch
+                wav = _torch.from_numpy(wav)
+        import torch as _torch
+        if not _torch.is_floating_point(wav):
+            wav = wav.float() / 32768.0
+        if wav.dim() == 1:
+            wav = wav.unsqueeze(0)
+        if not args.no_trim:
+            wav = trim_silence(wav, thresh=1e-3)
+        return wav
+
     def _generate_with_prompt(text: str):
         # If tts has prepared conditionals (cached embedding loaded or built), call without path
         if getattr(tts, 'conds', None) is not None:
@@ -677,28 +701,52 @@ def main():
         )
 
     audio_chunks = []
-    for i, chunk in enumerate(text_chunks, 1):
-        # Preview remaining chunks starting from the second
-        if i > 1:
-            preview = chunk[:30].replace("\n", " ")
-            print(f"Chunk {i}/{len(text_chunks)}: '{preview}...'")
-        wav = _generate_with_prompt(chunk)
-        # float [-1, 1], [C, T]
-        if not hasattr(wav, "dim"):
-            # Some APIs might return numpy; convert if needed
-            import numpy as np
-            if isinstance(wav, np.ndarray):
-                import torch as _torch
-                wav = _torch.from_numpy(wav)
-        import torch as _torch
-        if not _torch.is_floating_point(wav):
-            wav = wav.float() / 32768.0
-        if wav.dim() == 1:
-            wav = wav.unsqueeze(0)
-        if not args.no_trim:
-            wav = trim_silence(wav, thresh=1e-3)
-        audio_chunks.append(wav)
-
+    use_parallel = args.workers > 1 or args.n_candidates > 1 or args.max_attempts > 1
+    if use_parallel:
+        try:
+            import gen_parallel
+        except Exception:
+            use_parallel = False
+    if use_parallel:
+        base_seed = args.seed or int(time.time())
+        gen_kwargs = {
+            "device": device,
+            "cfg_weight": args.cfg_weight,
+            "exaggeration": args.exaggeration,
+            "temperature": args.temperature,
+            "repetition_penalty": args.repetition_penalty,
+        }
+        result_map = gen_parallel.generate_chunks_parallel(
+            tts,
+            text_chunks,
+            base_seed,
+            workers=max(1, args.workers),
+            n_cands=max(1, args.n_candidates),
+            attempts=max(1, args.max_attempts),
+            gen_kwargs=gen_kwargs,
+        )
+        for i in range(len(text_chunks)):
+            items = result_map.get(i, [])
+            pick = None
+            for it in items:
+                if it.get("cand_idx") == 0 and it.get("attempt") == 0:
+                    pick = it
+                    break
+            if pick is None and items:
+                pick = items[0]
+            if pick is None:
+                continue
+            wav = pick["wav"]
+            wav = _process_wav(wav)
+            audio_chunks.append(wav)
+    else:
+        for i, chunk in enumerate(text_chunks, 1):
+            if i > 1:
+                preview = chunk[:30].replace("\n", " ")
+                print(f"Chunk {i}/{len(text_chunks)}: '{preview}...'")
+            wav = _generate_with_prompt(chunk)
+            wav = _process_wav(wav)
+            audio_chunks.append(wav)
     # Concatenate with crossfade to remove audible gaps
     if args.no_crossfade:
         import torch as _torch
