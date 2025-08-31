@@ -352,8 +352,6 @@ def prepare_voice(args) -> dict | None:
             from shutil import copy2
             copy2(src, ref)
             print(f"[voice] Bootstrapped reference: {ref}")
-        elif src and not src.exists():
-            print(f"Error: provided --audio-sample not found: {src}")
     return vp
 
 
@@ -438,6 +436,11 @@ def main():
     # TTS generation
     if not args.voice:
         print("Error: --voice is required for TTS generation (YouTube extraction is the only exception).")
+        return 1
+
+    # If a WAV was provided for bootstrap, it must exist (outside YouTube flow)
+    if args.audio_sample and not args.youtube_url and not args.audio_sample.exists():
+        print(f"Error: provided --audio-sample not found: {args.audio_sample}")
         return 1
 
     voice_paths = prepare_voice(args)
