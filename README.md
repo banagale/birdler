@@ -95,9 +95,9 @@ Generated audio will be written as `generated-audio/bigbird_exhausting_week.wav`
 ## How it works
 
 1. **Load** a pretrained ChatterboxTTS model onto your chosen device.
-2. **Read** your reference sample and the text chunks (default or user-supplied script).
-3. **Generate** each chunk in turn using the provided TTS parameters.
-4. **Concatenate** the audio chunks and save the final waveform.
+2. **Manage voice data** under `voices/<name>/`: keep a clean `samples/reference.wav` and a cached `embedding/cond.pt`.
+3. **Condition** on the cached embedding and generate each text chunk with your TTS parameters.
+4. **Concatenate** the audio chunks with crossfades and save the waveform.
 
 This script is a quick demo harness—you can adapt the chunks or hook into the
 ChatterboxTTS API directly for more advanced workflows.

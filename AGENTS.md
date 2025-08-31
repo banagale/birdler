@@ -5,6 +5,7 @@
 - `tests/`: Pytest suite for args, chunking, and IO behaviors.
 - `text-scripts/`: Example input texts for synthesis.
 - `audio-samples/`: Example/placeholder voice prompts; keep files small and clean.
+- `voices/`: Managed voices (`samples/reference.wav`, `embedding/cond.pt`); git-ignored except `.gitkeep`.
 - `generated-audio/`: Output WAVs (git-ignored placeholder present).
 - `README.md`: Usage, flags, and installation notes.
 

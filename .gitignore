@@ -70,3 +70,7 @@ voice_models/
 
 # ---- Test Output ----
 test_output/
+
+# ---- Managed Voices ----
+/voices/*
+!/voices/.gitkeep
