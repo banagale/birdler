@@ -89,6 +89,16 @@ def parse_args():
         help="Penalty to discourage repetition in generation",
     )
     parser.add_argument(
+        "--seed",
+        type=int,
+        help="Base random seed for deterministic generation",
+    )
+    parser.add_argument(
+        "--deterministic",
+        action="store_true",
+        help="Enable deterministic algorithms where supported (may reduce speed)",
+    )
+    parser.add_argument(
         "--bootstrap-only",
         action="store_true",
         help="Only set up the managed voice (download/copy + cache embedding), then exit",
@@ -150,6 +160,26 @@ def select_device(preferred: str | None = None) -> str:
         import torch  # noqa: F401
     except Exception:
         return "cpu"
+
+
+def set_determinism(device: str):
+    try:
+        import torch
+    except Exception:
+        return
+    try:
+        torch.backends.cudnn.benchmark = False
+        if hasattr(torch.backends.cudnn, "deterministic"):
+            torch.backends.cudnn.deterministic = True
+        torch.use_deterministic_algorithms(True, warn_only=True)
+    except Exception:
+        pass
+    if device == "cuda":
+        try:
+            torch.backends.cuda.matmul.allow_tf32 = False
+            torch.backends.cudnn.allow_tf32 = False
+        except Exception:
+            pass
     import torch, sys as _sys
     try:
         is_macos = (_sys.platform == "darwin")
@@ -162,6 +192,26 @@ def select_device(preferred: str | None = None) -> str:
     if torch.backends.mps.is_available():
         return "mps"
     return "cpu"
+
+
+def set_determinism(device: str):
+    try:
+        import torch
+    except Exception:
+        return
+    try:
+        torch.backends.cudnn.benchmark = False
+        if hasattr(torch.backends.cudnn, "deterministic"):
+            torch.backends.cudnn.deterministic = True
+        torch.use_deterministic_algorithms(True, warn_only=True)
+    except Exception:
+        pass
+    if device == "cuda":
+        try:
+            torch.backends.cuda.matmul.allow_tf32 = False
+            torch.backends.cudnn.allow_tf32 = False
+        except Exception:
+            pass
 
 
 DEFAULT_TEXT = (
@@ -476,6 +526,8 @@ def main():
     args = parse_args()
     device = select_device(args.device)
     print(f"Using device: {device}")
+    if args.deterministic:
+        set_determinism(device)
 
     # YouTube extraction
     if args.youtube_url and not args.voice:
