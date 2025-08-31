@@ -159,6 +159,12 @@ def parse_args():
     parser.add_argument("--warmup", action="store_true", help="Run a short warmup generate to reduce first-latency")
     parser.add_argument("--no-trim", action="store_true", help="Disable silence trimming on chunks")
     parser.add_argument("--no-crossfade", action="store_true", help="Disable crossfade concat between chunks")
+    parser.add_argument("--denoise", action="store_true", help="Apply RNNoise denoise after render (requires CLI denoise and ffmpeg)")
+    parser.add_argument("--auto-editor", action="store_true", help="Run auto-editor to tighten long silences (requires auto-editor)")
+    parser.add_argument("--auto-editor-threshold", type=float, default=0.06, help="Silence threshold for auto-editor")
+    parser.add_argument("--auto-editor-margin", type=float, default=0.2, help="Silence margin (s) for auto-editor")
+    parser.add_argument("--keep-original", action="store_true", help="Keep original WAV when using auto-editor")
+    parser.add_argument("--normalize", choices=["ebu", "peak"], help="Normalize output loudness with ffmpeg")
     return parser.parse_args()
 
 
@@ -765,6 +771,17 @@ def main():
     # Save
     sr = getattr(tts, "sr", 22050)
     torchaudio.save(str(out_path), final_audio, sr)
+    # Optional post-processing
+    try:
+        import postprocess as _pp
+        if args.denoise:
+            _ = _pp.denoise_in_place(out_path)
+        if args.auto_editor:
+            _pp.run_auto_editor_in_place(out_path, threshold=args.auto_editor_threshold, margin=args.auto_editor_margin, keep_original=args.keep_original)
+        if args.normalize:
+            _pp.normalize_ffmpeg_in_place(out_path, method=args.normalize)
+    except Exception:
+        pass
     print(f"Saved output to: {out_path} ({out_path.stat().st_size} bytes)")
     return 0
 
