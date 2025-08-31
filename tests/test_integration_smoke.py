@@ -47,6 +47,7 @@ def test_end_to_end_smoke(tmp_path, monkeypatch):
 
     # Stub chatterbox TTS
     chat = types.ModuleType("chatterbox")
+    chat_tts = types.ModuleType("chatterbox.tts")
 
     class FakeTTS:
         sr = 22050
@@ -73,8 +74,9 @@ def test_end_to_end_smoke(tmp_path, monkeypatch):
         def from_pretrained(cls, device=None):
             return cls()
 
-    chat.ChatterboxTTS = FakeTTS
+    chat_tts.ChatterboxTTS = FakeTTS
     monkeypatch.setitem(sys.modules, "chatterbox", chat)
+    monkeypatch.setitem(sys.modules, "chatterbox.tts", chat_tts)
 
     # Bypass heavy audio ops in pipeline
     monkeypatch.setattr(birdler, "trim_silence", lambda w, thresh=1e-3: w, raising=False)

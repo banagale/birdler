@@ -40,6 +40,7 @@ def make_stubs(monkeypatch):
 
     # chatterbox stub
     chat = types.ModuleType('chatterbox')
+    chat_tts = types.ModuleType('chatterbox.tts')
     class FakeTTS:
         sr = 22050
         def get_audio_conditioning(self, path):
@@ -53,8 +54,9 @@ def make_stubs(monkeypatch):
         @classmethod
         def from_pretrained(cls, device=None):
             return cls()
-    chat.ChatterboxTTS = FakeTTS
+    chat_tts.ChatterboxTTS = FakeTTS
     monkeypatch.setitem(sys.modules, 'chatterbox', chat)
+    monkeypatch.setitem(sys.modules, 'chatterbox.tts', chat_tts)
 
 
 def test_youtube_bootstrap_voice(tmp_path, monkeypatch):

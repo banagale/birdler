@@ -535,12 +535,14 @@ def main():
     # Dependency checks and informative versions
     try:
         import chatterbox  # noqa: F401
-        _cbx_ver = version("chatterbox-tts")
-    except PackageNotFoundError:
+        try:
+            _cbx_ver = version("chatterbox-tts")
+        except PackageNotFoundError:
+            print("[warn] chatterbox-tts package metadata not found; proceeding (ensure chatterbox-tts>=0.1.2 is installed)")
+            _cbx_ver = "unknown"
+    except Exception:
         print("Error: chatterbox-tts is not installed. Try: pip install 'chatterbox-tts>=0.1.2'")
         return 1
-    except Exception:
-        _cbx_ver = "unknown"
 
     import torch
     import torchaudio

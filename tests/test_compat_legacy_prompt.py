@@ -31,6 +31,7 @@ def make_stubs(monkeypatch):
 
     # chatterbox stub without get_audio_conditioning
     chat = types.ModuleType('chatterbox')
+    chat_tts = types.ModuleType('chatterbox.tts')
     class FakeTTS:
         sr = 22050
         class _Wave:
@@ -55,8 +56,9 @@ def make_stubs(monkeypatch):
         def clamp(self, a, b): return self
         def to(self, dtype=None): return self
     monkeypatch.setattr(birdler, 'crossfade_concat', lambda chunks, fade_samples=2048: FakeFinal(), raising=False)
-    chat.ChatterboxTTS = FakeTTS
+    chat_tts.ChatterboxTTS = FakeTTS
     monkeypatch.setitem(sys.modules, 'chatterbox', chat)
+    monkeypatch.setitem(sys.modules, 'chatterbox.tts', chat_tts)
 
 
 def test_generation_with_compat_legacy_prompt(tmp_path, monkeypatch):
