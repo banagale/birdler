@@ -165,6 +165,11 @@ def parse_args():
     parser.add_argument("--auto-editor-margin", type=float, default=0.2, help="Silence margin (s) for auto-editor")
     parser.add_argument("--keep-original", action="store_true", help="Keep original WAV when using auto-editor")
     parser.add_argument("--normalize", choices=["ebu", "peak"], help="Normalize output loudness with ffmpeg")
+    parser.add_argument("--validate", action="store_true", help="Enable validation/selection pipeline")
+    parser.add_argument("--validate-threshold", type=float, default=0.85, help="Validation score threshold")
+    parser.add_argument("--prefer-longest-on-fail", action="store_true", help="On failure, prefer longest transcript")
+    parser.add_argument("--whisper-backend", type=str, default="faster", help="Whisper backend (openai|faster)")
+    parser.add_argument("--whisper-model", type=str, default="base", help="Whisper model name")
     return parser.parse_args()
 
 
