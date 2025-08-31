@@ -1,4 +1,4 @@
-from select import pick_candidate
+from selection import pick_candidate
 
 def test_pick_highest_score():
     passed = [(0.7, {'p':1}, 'a'), (0.9, {'p':2}, 'b')]
