@@ -17,7 +17,7 @@ text input (from a file or direct string).
 
 ## Installation
 
-Make sure you have Python 3.8+ and install dependencies:
+Make sure you have Python 3.12+ and install dependencies:
 
 ```bash
 pip install torch torchaudio chatterbox-tts
@@ -39,6 +39,24 @@ python birdler.py \
   --exaggeration 0.8 \
   --temperature 0.7 \
   --repetition-penalty 1.1
+```
+
+### Voice workflow (managed speakers and cached embeddings)
+
+First run bootstraps a voice directory and caches an embedding:
+
+```bash
+python birdler.py \
+  --voice ripley \
+  --audio-sample audio-samples/ripley/aliens-ripley-scene-clip-clean.wav \
+  --text-file text-scripts/style-charles-bukowski.txt \
+  --output-dir generated-audio
+```
+
+Subsequent runs can omit the sample and reuse the cached embedding:
+
+```bash
+python birdler.py --voice ripley --text "Another line" --output-dir generated-audio
 ```
 
 ### Synthesize from a text script file
@@ -71,6 +89,7 @@ python birdler.py \
 ### Arguments
 
 - `--audio-sample`: Path to a clean WAV file that serves as the voice prompt.
+  - Tip: combine with `--voice <name>` on first run to bootstrap a managed voice.
 - `--youtube-url`: YouTube URL to extract audio from (requires yt-dlp or youtube-dl); if set, extracts audio and exits.
 - `--output-dir`: Directory where the generated WAV or extracted audio will be saved.
 - `--device`: Force a device (`cpu`, `cuda`, or `mps`); auto-detected if omitted.
@@ -81,6 +100,9 @@ python birdler.py \
 
 - `--text-file`: Path to a text file to synthesize (mutually exclusive with --text).
 - `--text`: Text string to synthesize directly (mutually exclusive with --text-file).
+
+- `--voice`: Managed voice name stored under `voices/<name>`.
+- `--voice-dir`: Root directory for managed voices (default: `voices`).
 
 Generated audio will be written as `generated-audio/bigbird_exhausting_week.wav` by default.
 
