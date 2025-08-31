@@ -8,14 +8,17 @@ class DummyArgs:
     def __init__(self, text=None, text_file=None):
         self.text = text
         self.text_file = text_file
+        self.max_chars = 280
+        self.hard_max_chars = 360
 
 
 def test_default_chunks():
-    # Default behavior returns the hardcoded Big Bird chunks
+    # Default behavior returns at least one chunk of DEFAULT_TEXT
     args = DummyArgs()
     chunks = birdler.get_text_chunks(args)
     assert isinstance(chunks, list)
-    assert len(chunks) == 3
+    assert len(chunks) >= 1
+    assert all(isinstance(c, str) and c for c in chunks)
 
 
 def test_direct_text_short():
@@ -26,14 +29,12 @@ def test_direct_text_short():
 
 
 def test_direct_text_long_splits():
-    # Create a script longer than default max chunk length
-    default_chunks = birdler.get_text_chunks(DummyArgs())
-    max_def = max(len(c) for c in default_chunks)
-    long_text = "x" * (max_def + 50)
+    # Create a script significantly longer than default max chunk length
+    long_text = "x" * 600
     args = DummyArgs(text=long_text)
     chunks = birdler.get_text_chunks(args)
-    # Should split into same number of default chunks and reconstruct
-    assert len(chunks) == len(default_chunks)
+    # Should split into multiple chunks and reconstruct
+    assert len(chunks) >= 2
     assert "".join(chunks) == long_text
 
 

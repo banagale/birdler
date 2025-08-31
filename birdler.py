@@ -219,6 +219,63 @@ def _slugify_text(s: str, max_len: int = 40) -> str:
     return s[:max_len] or "default"
 
 
+def trim_silence(wav, thresh: float = 1e-3):
+    """
+    Trim leading/trailing regions where mean(|x|) <= thresh.
+    wav shape: [C, T] or [T].
+    """
+    try:
+        import torch  # noqa: F401
+    except Exception:
+        return wav
+    import torch
+
+    if wav.dim() == 1:
+        wav = wav.unsqueeze(0)
+    x = wav.abs().mean(dim=0)  # [T]
+    idx = (x > thresh).nonzero(as_tuple=False).squeeze()
+    if getattr(idx, "numel", lambda: 0)() == 0:
+        return wav
+    start, end = int(idx[0].item()), int(idx[-1].item()) + 1
+    return wav[:, start:end]
+
+
+def crossfade_concat(chunks, fade_samples: int = 2048):
+    """
+    Crossfade-adjacent concatenate to avoid gaps. Assumes same sample rate.
+    """
+    try:
+        import torch  # noqa: F401
+    except Exception:
+        return chunks[0] if chunks else None
+    import torch
+
+    if not chunks:
+        return torch.zeros(1, 0)
+    out = chunks[0]
+    for nxt in chunks[1:]:
+        # channel align
+        if nxt.size(0) != out.size(0):
+            if nxt.size(0) == 1:
+                nxt = nxt.repeat(out.size(0), 1)
+            elif out.size(0) == 1:
+                out = out.repeat(nxt.size(0), 1)
+            else:
+                c = min(out.size(0), nxt.size(0))
+                out, nxt = out[:c], nxt[:c]
+        f = min(fade_samples, out.size(1), nxt.size(1))
+        if f <= 0:
+            out = torch.cat([out, nxt], dim=1)
+            continue
+        fade_out = torch.linspace(1.0, 0.0, f, device=out.device).unsqueeze(0)
+        fade_in = torch.linspace(0.0, 1.0, f, device=out.device).unsqueeze(0)
+        x_tail = out[:, -f:] * fade_out
+        y_head = nxt[:, :f] * fade_in
+        blended = x_tail + y_head
+        out = torch.cat([out[:, :-f], blended, nxt[:, f:]], dim=1)
+    return out
+
+
 def _derive_outname(args, text_chunks) -> str:
     if getattr(args, "voice", None):
         sample_slug = _slugify_text(args.voice, max_len=40)
@@ -342,49 +399,6 @@ def main():
     import torch
     import torchaudio
     from chatterbox import ChatterboxTTS
-
-    def trim_silence(wav: torch.Tensor, thresh: float = 1e-3) -> torch.Tensor:
-        """
-        Trim leading/trailing regions where mean(|x|) <= thresh.
-        wav shape: [C, T] or [T].
-        """
-        if wav.dim() == 1:
-            wav = wav.unsqueeze(0)
-        x = wav.abs().mean(dim=0)  # [T]
-        idx = (x > thresh).nonzero(as_tuple=False).squeeze()
-        if idx.numel() == 0:
-            return wav
-        start, end = int(idx[0].item()), int(idx[-1].item()) + 1
-        return wav[:, start:end]
-
-    def crossfade_concat(chunks, fade_samples: int = 2048) -> torch.Tensor:
-        """
-        Crossfade-adjacent concatenate to avoid gaps. Assumes same sample rate.
-        """
-        if not chunks:
-            return torch.zeros(1, 0)
-        out = chunks[0]
-        for nxt in chunks[1:]:
-            # channel align
-            if nxt.size(0) != out.size(0):
-                if nxt.size(0) == 1:
-                    nxt = nxt.repeat(out.size(0), 1)
-                elif out.size(0) == 1:
-                    out = out.repeat(nxt.size(0), 1)
-                else:
-                    c = min(out.size(0), nxt.size(0))
-                    out, nxt = out[:c], nxt[:c]
-            f = min(fade_samples, out.size(1), nxt.size(1))
-            if f <= 0:
-                out = torch.cat([out, nxt], dim=1)
-                continue
-            fade_out = torch.linspace(1.0, 0.0, f, device=out.device).unsqueeze(0)
-            fade_in = torch.linspace(0.0, 1.0, f, device=out.device).unsqueeze(0)
-            x_tail = out[:, -f:] * fade_out
-            y_head = nxt[:, :f] * fade_in
-            blended = x_tail + y_head
-            out = torch.cat([out[:, :-f], blended, nxt[:, f:]], dim=1)
-        return out
 
     # Chunking
     text_chunks = get_text_chunks(args)

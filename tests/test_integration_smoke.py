@@ -21,6 +21,9 @@ def make_torch_stub():
             return False
     torch.cuda = _CUDA()
     torch.Tensor = object
+    def is_floating_point(x):
+        return True
+    torch.is_floating_point = is_floating_point
     torch.float32 = object()
     return torch
 
@@ -52,9 +55,19 @@ def test_end_to_end_smoke(tmp_path, monkeypatch):
             # Return a simple serializable object
             return {"ok": True, "path": Path(path).name}
 
+        class _Wave:
+            def dim(self):
+                return 1
+
+            def unsqueeze(self, axis):
+                return self
+
+            def float(self):
+                return self
+
         def generate(self, text, **kwargs):
-            # Return a lightweight stand-in object; downstream we bypass heavy ops
-            return object()
+            # Return a minimal stub that satisfies downstream checks
+            return self._Wave()
 
         @classmethod
         def from_pretrained(cls, device=None):
