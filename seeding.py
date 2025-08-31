@@ -22,20 +22,22 @@ def generate_with_seed(tts, text: str, seed: int, **kw):
         import torch  # noqa: F401
     except Exception:
         # No torch available: just call through
-        return tts.generate(text, **kw)
+        return tts.generate(text, **call_kwargs)
 
     import torch
     params = inspect.signature(tts.generate).parameters
+    # Filter kwargs to only those accepted by generate()
+    call_kwargs = {k: v for k, v in kw.items() if k in params}
     device = kw.get("device")
     if "generator" in params and device != "mps":
         gen_device = "cuda" if device == "cuda" else "cpu"
         gen = torch.Generator(device=gen_device)
         gen.manual_seed(seed & 0xFFFFFFFFFFFFFFFF)
-        return tts.generate(text, generator=gen, **kw)
+        return tts.generate(text, generator=gen, **call_kwargs)
 
     devices = [torch.cuda.current_device()] if device == "cuda" and torch.cuda.is_available() else []
     with torch.random.fork_rng(devices=devices, enabled=True):
         torch.manual_seed(seed)
         if device == "cuda" and torch.cuda.is_available():
             torch.cuda.manual_seed_all(seed)
-        return tts.generate(text, **kw)
+        return tts.generate(text, **call_kwargs)
