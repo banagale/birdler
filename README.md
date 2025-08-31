@@ -46,13 +46,15 @@ Subsequent runs can omit the sample and reuse the cached embedding:
 ```bash
 python birdler.py --voice ripley --text "Another line" --output-dir generated-audio
 
-Bootstrap from YouTube directly into the managed voice (no manual editing):
+Bootstrap from YouTube directly into the managed voice (review/edit first):
 
 ```bash
 python birdler.py \
   --voice ripley \
-  --youtube-url 'https://www.youtube.com/watch?v=XXXX' \
-  --bootstrap-only
+  --youtube-url 'https://www.youtube.com/watch?v=XXXX'
+
+# Optional: once you've cleaned voices/ripley/samples/reference.wav, cache embedding:
+python birdler.py --voice ripley --build-embedding --bootstrap-only
 ```
 
 Re-run with any text once the embedding is cached:

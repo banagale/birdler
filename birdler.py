@@ -93,6 +93,11 @@ def parse_args():
         help="Only set up the managed voice (download/copy + cache embedding), then exit",
     )
     parser.add_argument(
+        "--build-embedding",
+        action="store_true",
+        help="After setting up the managed voice, compute and cache the embedding now",
+    )
+    parser.add_argument(
         "--force-voice-ref",
         action="store_true",
         help="Overwrite an existing voices/<voice>/samples/reference.wav during bootstrap",
@@ -414,6 +419,12 @@ def main():
                 [ytdlp_cmd, "--extract-audio", "--audio-format", "wav", "-o", str(out_template), args.youtube_url],
                 check=True,
             )
+        if not args.build_embedding:
+            print("[voice] Reference downloaded. Skipping embedding build for YouTube sources by default.")
+            print("       Review/clean the reference.wav, then run with --build-embedding.")
+            return 0
+        # If building embedding now, continue into TTS path but exit early after embedding
+        args.bootstrap_only = True
 
     # TTS generation
     if not args.voice:

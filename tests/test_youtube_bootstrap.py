@@ -71,7 +71,7 @@ def test_youtube_bootstrap_voice(tmp_path, monkeypatch):
         ref_path.write_bytes(b'RIFF..WAVE')
     monkeypatch.setattr(birdler.subprocess, 'run', fake_run)
 
-    # Bootstrap only
+    # Bootstrap only: download only, no embedding by default
     monkeypatch.setattr(sys, 'argv', [
         'birdler.py', '--voice', 'neo', '--voice-dir', str(voices_dir),
         '--youtube-url', 'http://example.com', '--bootstrap-only',
@@ -80,6 +80,15 @@ def test_youtube_bootstrap_voice(tmp_path, monkeypatch):
     rc = birdler.main()
     assert rc == 0
     assert ref_path.exists()
-    # Embedding should be cached
+    # Embedding should not exist yet
     emb = voices_dir / 'neo' / 'embedding' / 'cond.pt'
+    assert not emb.exists()
+
+    # Now build embedding explicitly
+    monkeypatch.setattr(sys, 'argv', [
+        'birdler.py', '--voice', 'neo', '--voice-dir', str(voices_dir),
+        '--build-embedding', '--bootstrap-only', '--output-dir', str(out_dir),
+    ])
+    rc2 = birdler.main()
+    assert rc2 == 0
     assert emb.exists()
