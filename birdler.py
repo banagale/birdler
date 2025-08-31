@@ -89,6 +89,12 @@ def parse_args():
         help="Penalty to discourage repetition in generation",
     )
     parser.add_argument(
+        "--run-index",
+        type=int,
+        default=0,
+        help="Generation index used in output filenames",
+    )
+    parser.add_argument(
         "--seed",
         type=int,
         help="Base random seed for deterministic generation",
@@ -180,36 +186,16 @@ def select_device(preferred: str | None = None) -> str:
         import torch  # noqa: F401
     except Exception:
         return "cpu"
-
-
-def set_determinism(device: str):
-    try:
-        import torch
-    except Exception:
-        return
-    try:
-        torch.backends.cudnn.benchmark = False
-        if hasattr(torch.backends.cudnn, "deterministic"):
-            torch.backends.cudnn.deterministic = True
-        torch.use_deterministic_algorithms(True, warn_only=True)
-    except Exception:
-        pass
-    if device == "cuda":
-        try:
-            torch.backends.cuda.matmul.allow_tf32 = False
-            torch.backends.cudnn.allow_tf32 = False
-        except Exception:
-            pass
     import torch, sys as _sys
     try:
         is_macos = (_sys.platform == "darwin")
     except Exception:
         is_macos = False
-    if is_macos and torch.backends.mps.is_available():
+    if is_macos and getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
         return "mps"
     if torch.cuda.is_available():
         return "cuda"
-    if torch.backends.mps.is_available():
+    if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
         return "mps"
     return "cpu"
 
