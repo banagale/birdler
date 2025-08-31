@@ -91,4 +91,5 @@ def test_bootstrap_build_embedding_fails_in_compat(tmp_path, monkeypatch):
         '--bootstrap-only', '--build-embedding', '--compat-legacy-prompt'
     ])
     rc = birdler.main()
-    assert rc == 1
+    # In compat mode, bootstrap with build-embedding succeeds with advisory
+    assert rc == 0
