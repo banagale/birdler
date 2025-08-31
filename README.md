@@ -29,21 +29,9 @@ For YouTube audio extraction (optional feature), install `yt-dlp` (and ensure `f
 pip install yt-dlp    # or youtube-dl
 ```
 
-## Usage
+## Usage (managed voices)
 
-```bash
-python birdler.py \
-  --audio-sample /path/to/clean_sample.wav \
-  --output-dir generated-audio \
-  --cfg-weight 0.3 \
-  --exaggeration 0.8 \
-  --temperature 0.7 \
-  --repetition-penalty 1.1
-```
-
-### Voice workflow (managed speakers and cached embeddings)
-
-First run bootstraps a voice directory and caches an embedding:
+First run bootstraps a voice directory and caches a speaker embedding:
 
 ```bash
 python birdler.py \
@@ -88,8 +76,9 @@ python birdler.py \
 
 ### Arguments
 
-- `--audio-sample`: Path to a clean WAV file that serves as the voice prompt.
-  - Tip: combine with `--voice <name>` on first run to bootstrap a managed voice.
+- `--voice`: Managed voice name stored under `voices/<name>` (required for TTS).
+- `--voice-dir`: Root directory for managed voices (default: `voices`).
+- `--audio-sample`: Reference WAV used only to bootstrap a new `--voice` on first run.
 - `--youtube-url`: YouTube URL to extract audio from (requires yt-dlp or youtube-dl); if set, extracts audio and exits.
 - `--output-dir`: Directory where the generated WAV or extracted audio will be saved.
 - `--device`: Force a device (`cpu`, `cuda`, or `mps`); auto-detected if omitted.
@@ -100,9 +89,6 @@ python birdler.py \
 
 - `--text-file`: Path to a text file to synthesize (mutually exclusive with --text).
 - `--text`: Text string to synthesize directly (mutually exclusive with --text-file).
-
-- `--voice`: Managed voice name stored under `voices/<name>`.
-- `--voice-dir`: Root directory for managed voices (default: `voices`).
 
 Generated audio will be written as `generated-audio/bigbird_exhausting_week.wav` by default.
 

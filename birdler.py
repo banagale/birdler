@@ -31,8 +31,8 @@ def parse_args():
         "-i",
         "--audio-sample",
         type=Path,
-        default=Path("audio-samples/bigbird/bigbird_youtube_clean.wav"),
-        help="Path to the clean reference audio sample",
+        default=None,
+        help="Reference WAV used to bootstrap a managed voice (requires --voice)",
     )
     # Voice-based workflow (can be combined with --audio-sample on first run)
     parser.add_argument(
@@ -220,7 +220,10 @@ def _slugify_text(s: str, max_len: int = 40) -> str:
 
 
 def _derive_outname(args, text_chunks) -> str:
-    sample_slug = (args.audio_sample.stem if args.audio_sample else "sample")
+    if getattr(args, "voice", None):
+        sample_slug = _slugify_text(args.voice, max_len=40)
+    else:
+        sample_slug = (args.audio_sample.stem if args.audio_sample else "sample")
     sample_slug = _slugify_text(sample_slug, max_len=40)
 
     if args.text:
@@ -256,9 +259,6 @@ def prepare_voice(args) -> dict | None:
     Returns a dict of paths when args.voice is set; otherwise None.
     """
     if not getattr(args, "voice", None):
-        # Back-compat: warn if using legacy audio-sample without voice
-        if getattr(args, "audio_sample", None):
-            print("[warn] Using --audio-sample without --voice; consider --voice for caching.")
         return None
 
     vp = _voice_paths(args.voice, args.voice_dir)
@@ -273,8 +273,6 @@ def prepare_voice(args) -> dict | None:
 
             copy2(src, vp["ref_wav"])
             print(f"[voice] Bootstrapped reference: {vp['ref_wav']}")
-        else:
-            print("[warn] --voice specified but no valid --audio-sample to bootstrap reference.wav")
     return vp
 
 
@@ -328,14 +326,14 @@ def main():
         return 0
 
     # TTS generation
+    if not args.voice:
+        print("Error: --voice is required for TTS generation (YouTube extraction is the only exception).")
+        return 1
+
     voice_paths = prepare_voice(args)
-    ref_path = None
-    if voice_paths:
-        ref_path = voice_paths["ref_wav"] if voice_paths["ref_wav"].exists() else None
-    # Legacy path if no voice setup
-    legacy_path = args.audio_sample if getattr(args, "audio_sample", None) else None
-    if not ref_path and not (legacy_path and legacy_path.exists()):
-        print(f"Error: no valid reference audio. Provide --voice with a bootstrapping --audio-sample, or a valid --audio-sample path. Current: {legacy_path}")
+    ref_path = voice_paths["ref_wav"] if voice_paths and voice_paths["ref_wav"].exists() else None
+    if not ref_path and not args.audio_sample:
+        print("Error: first run for a new --voice requires --audio-sample to bootstrap reference.wav")
         return 1
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -399,30 +397,16 @@ def main():
 
     tts = ChatterboxTTS.from_pretrained(device=device)
 
-    # Prepare cached embedding when using voice workflow
-    audio_prompt_cond = None
-    if voice_paths:
-        audio_prompt_cond = get_or_build_embedding(tts, voice_paths)
+    # Prepare cached embedding (required)
+    audio_prompt_cond = get_or_build_embedding(tts, voice_paths)
+    if audio_prompt_cond is None:
+        print("Error: TTS backend must support get_audio_conditioning and audio_prompt_cond")
+        return 1
 
     def _generate_with_prompt(text: str):
-        # Prefer embedding if available
-        if audio_prompt_cond is not None:
-            try:
-                return tts.generate(
-                    text,
-                    audio_prompt_cond=audio_prompt_cond,
-                    cfg_weight=args.cfg_weight,
-                    exaggeration=args.exaggeration,
-                    temperature=args.temperature,
-                    repetition_penalty=args.repetition_penalty,
-                )
-            except TypeError:
-                print("[warn] TTS backend does not accept audio_prompt_cond; falling back to audio_prompt_path")
-        # Fallback: use path (voice ref if exists; else legacy sample)
-        path = ref_path if ref_path is not None and ref_path.exists() else legacy_path
         return tts.generate(
             text,
-            audio_prompt_path=str(path),
+            audio_prompt_cond=audio_prompt_cond,
             cfg_weight=args.cfg_weight,
             exaggeration=args.exaggeration,
             temperature=args.temperature,
