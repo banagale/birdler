@@ -131,6 +131,12 @@ def parse_args():
         default=360,
         help="Hard cap per chunk; overflow is forcibly split on whitespace",
     )
+    parser.add_argument(
+        "--min-chars",
+        type=int,
+        default=20,
+        help="Minimum characters per chunk (merge short adjacent chunks)",
+    )
     parser.add_argument("--warmup", action="store_true", help="Run a short warmup generate to reduce first-latency")
     parser.add_argument("--no-trim", action="store_true", help="Disable silence trimming on chunks")
     parser.add_argument("--no-crossfade", action="store_true", help="Disable crossfade concat between chunks")
@@ -231,13 +237,16 @@ def get_text_chunks(args):
     if not script:
         return []
 
-    sentences = _split_into_sentences(script)
-    if not sentences:
-        # No punctuation; split by words
-        words = script.split()
-        sentences = [" ".join(words)] if len(words) <= args.max_chars else [" ".join(words)]
-
-    chunks = _greedy_sentence_pack(sentences, args.max_chars, args.hard_max_chars)
+    try:
+        from chunking import get_chunks as _ext_get_chunks
+        chunks = _ext_get_chunks(script, soft_max=args.max_chars, hard_max=args.hard_max_chars, min_len=args.min_chars)
+    except Exception:
+        sentences = _split_into_sentences(script)
+        if not sentences:
+            # No punctuation; split by words
+            words = script.split()
+            sentences = [" ".join(words)] if len(words) <= args.max_chars else [" ".join(words)]
+        chunks = _greedy_sentence_pack(sentences, args.max_chars, args.hard_max_chars)
     print(f"Dynamic chunking: {len(chunks)} chunks (len={len(script)} chars, target={args.max_chars}, hard={args.hard_max_chars})")
     return chunks
 
