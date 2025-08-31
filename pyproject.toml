@@ -12,7 +12,7 @@ package-mode = false
 
 [tool.poetry.dependencies]
 python = ">=3.12,<4.0"
-chatterbox-tts = "*"
+chatterbox-tts = "^0.1.2"
 yt-dlp = {version = "*", optional = true}
 youtube-dl = {version = "*", optional = true}
 dotenv = "0.9.9"
@@ -48,3 +48,6 @@ line-ending = "lf"
 [tool.ruff.lint]
 select = ["E", "F", "I"]
 fixable = ["ALL"]
+
+[tool.poetry.scripts]
+birdler = "birdler:main"

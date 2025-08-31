@@ -100,11 +100,11 @@ python birdler.py \
 - `--force-voice-ref`: Overwrite an existing `voices/<name>/samples/reference.wav` during bootstrap.
 - `--youtube-url`: YouTube URL to extract audio from (requires yt-dlp or youtube-dl); if set, extracts audio and exits.
 - `--output-dir`: Directory where the generated WAV or extracted audio will be saved.
-- `--device`: Force a device (`cpu`, `cuda`, or `mps`); auto-detected if omitted.
-- `--cfg-weight`: Guidance scale (higher = more faithful to prompt).
-- `--exaggeration`: Expressiveness factor (higher = more dramatic).
-- `--temperature`: Sampling temperature (lower = more deterministic).
-- `--repetition-penalty`: Penalty to discourage stuttering.
+- `--device`: Force a device (`cpu`, `cuda`, or `mps`); auto-detected (prefers `mps` on macOS, otherwise `cuda`).
+- `--cfg-weight`: Guidance scale (default 0.5; higher = more faithful to prompt).
+- `--exaggeration`: Expressiveness factor (default 0.5; higher = more dramatic).
+- `--temperature`: Sampling temperature (default 0.8; lower = more deterministic).
+- `--repetition-penalty`: (default 1.2) discourages stuttering.
 
 - `--text-file`: Path to a text file to synthesize (mutually exclusive with --text).
 - `--text`: Text string to synthesize directly (mutually exclusive with --text-file).
@@ -124,3 +124,8 @@ ChatterboxTTS API directly for more advanced workflows.
 ## License
 
 MIT License © Rob Banagale
+- Watermark: outputs include imperceptible Perth watermarks per Chatterbox; see upstream docs for detection.
+
+### Presets
+- Neutral: `--cfg-weight 0.5 --exaggeration 0.5 --temperature 0.8`
+- Expressive: `--cfg-weight 0.3 --exaggeration 0.8 --temperature 0.7`

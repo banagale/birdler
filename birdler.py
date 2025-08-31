@@ -15,6 +15,7 @@ import time
 import re
 from pathlib import Path
 from shutil import which
+from importlib.metadata import version, PackageNotFoundError
 try:
     from dotenv import load_dotenv
     load_dotenv()
@@ -66,25 +67,25 @@ def parse_args():
     parser.add_argument(
         "--cfg-weight",
         type=float,
-        default=0.3,
+        default=0.5,
         help="Guidance scale for TTS (higher is more faithful)",
     )
     parser.add_argument(
         "--exaggeration",
         type=float,
-        default=0.8,
+        default=0.5,
         help="Exaggeration factor for expressiveness",
     )
     parser.add_argument(
         "--temperature",
         type=float,
-        default=0.7,
+        default=0.8,
         help="Sampling temperature for TTS generation",
     )
     parser.add_argument(
         "--repetition-penalty",
         type=float,
-        default=1.1,
+        default=1.2,
         help="Penalty to discourage repetition in generation",
     )
     parser.add_argument(
@@ -101,6 +102,11 @@ def parse_args():
         "--force-voice-ref",
         action="store_true",
         help="Overwrite an existing voices/<voice>/samples/reference.wav during bootstrap",
+    )
+    parser.add_argument(
+        "--compat-legacy-prompt",
+        action="store_true",
+        help="Use path-based prompting when embeddings are unsupported by backend (no caching)",
     )
     group2 = parser.add_mutually_exclusive_group()
     group2.add_argument(
@@ -125,22 +131,30 @@ def parse_args():
         default=360,
         help="Hard cap per chunk; overflow is forcibly split on whitespace",
     )
+    parser.add_argument("--warmup", action="store_true", help="Run a short warmup generate to reduce first-latency")
+    parser.add_argument("--no-trim", action="store_true", help="Disable silence trimming on chunks")
+    parser.add_argument("--no-crossfade", action="store_true", help="Disable crossfade concat between chunks")
     return parser.parse_args()
 
 
-def select_device(preferred=None):
+def select_device(preferred: str | None = None) -> str:
     if preferred:
         return preferred
     try:
         import torch  # noqa: F401
-    except ImportError:
+    except Exception:
         return "cpu"
-    import torch
-
-    if torch.backends.mps.is_available():
+    import torch, sys as _sys
+    try:
+        is_macos = (_sys.platform == "darwin")
+    except Exception:
+        is_macos = False
+    if is_macos and torch.backends.mps.is_available():
         return "mps"
     if torch.cuda.is_available():
         return "cuda"
+    if torch.backends.mps.is_available():
+        return "mps"
     return "cpu"
 
 
@@ -355,32 +369,98 @@ def prepare_voice(args) -> dict | None:
     return vp
 
 
-def get_or_build_embedding(tts, voice_paths: dict):
+def get_or_build_embedding(tts, voice_paths: dict, device: str | None = None, exaggeration: float | None = None):
     """
-    Load cached embedding if present; otherwise build via tts.get_audio_conditioning and cache.
-    Returns None if API is unavailable.
+    Preferred path (chatterbox>=0.1.x):
+    - Load/save Conditionals via chatterbox.tts.Conditionals
+    Fallback (older behavior):
+    - Use torch.load/save on a raw object if present.
+    Returns an object representing the loaded/created conditioning, or None.
     """
     emb_path: Path = voice_paths["emb_path"]
     ref_wav: Path = voice_paths["ref_wav"]
     try:
         import torch  # noqa: F401
     except Exception:
+        print("Error: torch not available; cannot build or load embedding")
         return None
     try:
         import torch
+        # Try Conditionals API
+        try:
+            from chatterbox.tts import Conditionals  # type: ignore
+        except Exception:
+            Conditionals = None  # type: ignore
+
         if emb_path.exists():
+            if Conditionals is not None:
+                conds = Conditionals.load(emb_path, map_location=(device or "cpu"))
+                if hasattr(conds, "to"):
+                    conds = conds.to(device or "cpu")
+                # attach to tts if possible
+                try:
+                    tts.conds = conds
+                except Exception:
+                    pass
+                return conds
+            # Raw torch object fallback
             return torch.load(emb_path)
-        if hasattr(tts, "get_audio_conditioning") and ref_wav.exists():
-            cond = tts.get_audio_conditioning(str(ref_wav))
+
+        if not ref_wav.exists():
+            print(f"Error: reference WAV missing at: {ref_wav}")
+            return None
+
+        # Build using preferred API: prepare_conditionals
+        if hasattr(tts, "prepare_conditionals"):
             try:
-                torch.save(cond, emb_path)
-                print(f"[voice] Cached embedding: {emb_path}")
-            except Exception:
-                print("[warn] Failed to cache embedding; continuing without cache")
-            return cond
+                tts.prepare_conditionals(str(ref_wav), exaggeration=exaggeration or 0.5)
+                conds = getattr(tts, "conds", None)
+                if conds is None:
+                    print("Error: prepare_conditionals did not set tts.conds")
+                    return None
+                # Save via Conditionals.save if available
+                if Conditionals is not None and hasattr(conds, "save"):
+                    try:
+                        conds.save(emb_path)
+                        print(f"[voice] Cached embedding: {emb_path}")
+                    except Exception as e:
+                        print(f"[warn] Failed to cache embedding to {emb_path}: {e}")
+                else:
+                    # Raw torch save as a best-effort
+                    try:
+                        torch.save(conds, emb_path)
+                        print(f"[voice] Cached embedding (raw): {emb_path}")
+                    except Exception as e:
+                        print(f"[warn] Failed to cache raw embedding to {emb_path}: {e}")
+                return conds
+            except Exception as e:
+                print(f"[warn] prepare_conditionals failed: {e}")
+
+        # Legacy embedding API (if any)
+        if hasattr(tts, "get_audio_conditioning"):
+            try:
+                cond = tts.get_audio_conditioning(str(ref_wav))
+                try:
+                    torch.save(cond, emb_path)
+                    print(f"[voice] Cached embedding: {emb_path}")
+                except Exception as e:
+                    print(f"[warn] Failed to cache embedding to {emb_path}: {e}")
+                return cond
+            except Exception as e:
+                print(f"[warn] get_audio_conditioning failed: {e}")
+
     except Exception as e:
         print(f"[warn] Embedding build/load failed: {e}")
     return None
+
+
+def _print_embedding_diagnostics(tts, voice_paths: dict):
+    ref_wav: Path = voice_paths["ref_wav"]
+    emb_path: Path = voice_paths["emb_path"]
+    print("Embedding diagnostics:")
+    print(f"- voice ref: {ref_wav} (exists={ref_wav.exists()})")
+    print(f"- target emb: {emb_path}")
+    print(f"- tts.has_get_audio_conditioning={hasattr(tts, 'get_audio_conditioning')}")
 
 
 def main():
@@ -452,9 +532,19 @@ def main():
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     # Heavy deps
+    # Dependency checks and informative versions
+    try:
+        import chatterbox  # noqa: F401
+        _cbx_ver = version("chatterbox-tts")
+    except PackageNotFoundError:
+        print("Error: chatterbox-tts is not installed. Try: pip install 'chatterbox-tts>=0.1.2'")
+        return 1
+    except Exception:
+        _cbx_ver = "unknown"
+
     import torch
     import torchaudio
-    from chatterbox import ChatterboxTTS
+    from chatterbox.tts import ChatterboxTTS
 
     # Chunking
     text_chunks = get_text_chunks(args)
@@ -468,19 +558,55 @@ def main():
     tts = ChatterboxTTS.from_pretrained(device=device)
 
     # Prepare cached embedding (required)
-    audio_prompt_cond = get_or_build_embedding(tts, voice_paths)
-    if audio_prompt_cond is None:
-        print("Error: TTS backend must support get_audio_conditioning and audio_prompt_cond")
+    audio_prompt_cond = get_or_build_embedding(tts, voice_paths, device=device, exaggeration=args.exaggeration)
+    if audio_prompt_cond is None and not args.compat_legacy_prompt:
+        _print_embedding_diagnostics(tts, voice_paths)
+        print("Error: embedding not available; see diagnostics above.")
         return 1
 
+    # Optional warmup
+    if args.warmup:
+        try:
+            _ = tts.generate(
+                "OK.",
+                cfg_weight=args.cfg_weight,
+                exaggeration=args.exaggeration,
+                temperature=args.temperature,
+                repetition_penalty=args.repetition_penalty,
+            )
+        except Exception:
+            pass
+
     if args.bootstrap_only:
-        print(f"[voice] Bootstrap complete for '{args.voice}' (embedding cached).")
+        if args.build_embedding:
+            if audio_prompt_cond is None:
+                if args.compat_legacy_prompt:
+                    _print_embedding_diagnostics(tts, voice_paths)
+                    print("[voice] Bootstrap complete. Note: embedding API unavailable; compat mode will use path-based prompting at runtime.")
+                    return 0
+                _print_embedding_diagnostics(tts, voice_paths)
+                print("Error: embedding build requested but unavailable; re-run with --compat-legacy-prompt or upgrade chatterbox-tts.")
+                return 1
+            print(f"[voice] Bootstrap complete for '{args.voice}' (embedding cached).")
+            return 0
+        # No embedding requested → success if reference exists
+        print(f"[voice] Bootstrap complete for '{args.voice}'.")
         return 0
 
     def _generate_with_prompt(text: str):
+        # If tts has prepared conditionals (cached embedding loaded or built), call without path
+        if getattr(tts, 'conds', None) is not None:
+            return tts.generate(
+                text,
+                cfg_weight=args.cfg_weight,
+                exaggeration=args.exaggeration,
+                temperature=args.temperature,
+                repetition_penalty=args.repetition_penalty,
+            )
+        # compat path-based prompting
         return tts.generate(
             text,
-            audio_prompt_cond=audio_prompt_cond,
+            audio_prompt_path=str(ref_path),
             cfg_weight=args.cfg_weight,
             exaggeration=args.exaggeration,
             temperature=args.temperature,
@@ -506,11 +632,17 @@ def main():
             wav = wav.float() / 32768.0
         if wav.dim() == 1:
             wav = wav.unsqueeze(0)
-        wav = trim_silence(wav, thresh=1e-3)
+        if not args.no_trim:
+            wav = trim_silence(wav, thresh=1e-3)
         audio_chunks.append(wav)
 
     # Concatenate with crossfade to remove audible gaps
-    final_audio = crossfade_concat(audio_chunks, fade_samples=2048).contiguous()
+    if args.no_crossfade:
+        import torch as _torch
+        final_audio = _torch.cat(audio_chunks, dim=1)
+    else:
+        adaptive_fade = max(256, min(2048, int(0.02 * getattr(tts, 'sr', 22050))))
+        final_audio = crossfade_concat(audio_chunks, fade_samples=adaptive_fade).contiguous()
 
     # Ensure dtype and sane amplitude
     final_audio = final_audio.clamp(-1.0, 1.0).to(dtype=torch.float32)
