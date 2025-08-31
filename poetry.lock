@@ -2591,4 +2591,4 @@ youtube = ["youtube-dl", "yt-dlp"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<4.0"
-content-hash = "140c5034f33bcec681d99720a90fd03bf9b364a4c4e6d17f166235271097e5e6"
+content-hash = "85e0479688feea687deb27f85e76c33e7544fe725515ed85ef2cec11d5ccf126"
