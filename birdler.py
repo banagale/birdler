@@ -171,6 +171,7 @@ def parse_args():
     parser.add_argument("--auto-editor-margin", type=float, default=0.2, help="Silence margin (s) for auto-editor")
     parser.add_argument("--keep-original", action="store_true", help="Keep original WAV when using auto-editor")
     parser.add_argument("--normalize", choices=["ebu", "peak"], help="Normalize output loudness with ffmpeg")
+    parser.add_argument("--atempo", type=float, help="Playback speed multiplier (0.5–2.0), pitch-preserving")
     parser.add_argument("--validate", action="store_true", help="Enable validation/selection pipeline")
     parser.add_argument("--validate-threshold", type=float, default=0.85, help="Validation score threshold")
     parser.add_argument("--prefer-longest-on-fail", action="store_true", help="On failure, prefer longest transcript")
@@ -780,6 +781,8 @@ def main():
             _pp.run_auto_editor_in_place(out_path, threshold=args.auto_editor_threshold, margin=args.auto_editor_margin, keep_original=args.keep_original)
         if args.normalize:
             _pp.normalize_ffmpeg_in_place(out_path, method=args.normalize)
+        if getattr(args, "atempo", None):
+            _pp.change_tempo_in_place(out_path, args.atempo)
     except Exception:
         pass
     try:

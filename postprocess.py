@@ -60,3 +60,15 @@ def denoise_in_place(wav_path: Path) -> bool:
                     p.unlink()
             except Exception:
                 pass
+
+
+def change_tempo_in_place(wav_path: Path, tempo: float) -> None:
+    """Change playback speed (pitch-preserving) using ffmpeg atempo (0.5–2.0)."""
+    wav_path = Path(wav_path)
+    if tempo is None or abs(tempo - 1.0) < 1e-6:
+        return
+    # Clamp to supported range; for values outside, users should run ffmpeg manually
+    t = max(0.5, min(2.0, float(tempo)))
+    tmp = wav_path.with_name(wav_path.stem + "_tempo.wav")
+    subprocess.run(["ffmpeg", "-y", "-i", str(wav_path), "-filter:a", f"atempo={t}", str(tmp)], check=True)
+    os.replace(tmp, wav_path)
