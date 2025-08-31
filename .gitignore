@@ -56,6 +56,10 @@ pip-wheel-metadata/
 !/audio-samples/bigbird/
 !/audio-samples/bigbird/**
 
+# Re-ignore macOS metadata inside unignored audio-samples subtrees
+/audio-samples/**/.DS_Store
+/audio-samples/**/.AppleDouble
+
 voice_models/
 
 # ---- Large Model Files ----
