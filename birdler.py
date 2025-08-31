@@ -400,7 +400,11 @@ def _derive_outname(args, text_chunks) -> str:
         text_slug = _slugify_text(" ".join(first.split()[:6]), max_len=40)
 
     ts = int(time.time())
-    return f"{sample_slug}_{text_slug}_{ts}.wav"
+    gen_part = f"_gen{getattr(args, 'run_index', 0)}"
+    seed_val = getattr(args, 'seed', None)
+    seed_part = f"_seed{seed_val}" if seed_val is not None else ""
+    return f"{sample_slug}_{text_slug}{gen_part}{seed_part}_{ts}.wav"
+
 
 
 def _voice_paths(voice: str, voices_root: Path) -> dict:
@@ -785,6 +789,27 @@ def main():
             _pp.run_auto_editor_in_place(out_path, threshold=args.auto_editor_threshold, margin=args.auto_editor_margin, keep_original=args.keep_original)
         if args.normalize:
             _pp.normalize_ffmpeg_in_place(out_path, method=args.normalize)
+    except Exception:
+        pass
+    try:
+        from settings_io import save_settings as _save
+        params = {
+            'voice': getattr(args, 'voice', None),
+            'voice_dir': str(args.voice_dir),
+            'seed': getattr(args, 'seed', None),
+            'run_index': getattr(args, 'run_index', 0),
+            'device': device,
+            'cfg_weight': args.cfg_weight,
+            'exaggeration': args.exaggeration,
+            'temperature': args.temperature,
+            'repetition_penalty': args.repetition_penalty,
+            'validate': getattr(args, 'validate', False),
+            'denoise': getattr(args, 'denoise', False),
+            'auto_editor': getattr(args, 'auto_editor', False),
+            'normalize': getattr(args, 'normalize', None),
+            'text_input': ''
+        }
+        _save(out_path, [out_path], params)
     except Exception:
         pass
     print(f"Saved output to: {out_path} ({out_path.stat().st_size} bytes)")
