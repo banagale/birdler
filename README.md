@@ -45,6 +45,21 @@ Subsequent runs can omit the sample and reuse the cached embedding:
 
 ```bash
 python birdler.py --voice ripley --text "Another line" --output-dir generated-audio
+
+Bootstrap from YouTube directly into the managed voice (no manual editing):
+
+```bash
+python birdler.py \
+  --voice ripley \
+  --youtube-url 'https://www.youtube.com/watch?v=XXXX' \
+  --bootstrap-only
+```
+
+Re-run with any text once the embedding is cached:
+
+```bash
+python birdler.py --voice ripley --text "Get away from her, you..."
+```
 ```
 
 ### Synthesize from a text script file
@@ -79,6 +94,8 @@ python birdler.py \
 - `--voice`: Managed voice name stored under `voices/<name>` (required for TTS).
 - `--voice-dir`: Root directory for managed voices (default: `voices`).
 - `--audio-sample`: Reference WAV used only to bootstrap a new `--voice` on first run.
+- `--bootstrap-only`: Only set up the voice (download/copy + cache embedding), then exit.
+- `--force-voice-ref`: Overwrite an existing `voices/<name>/samples/reference.wav` during bootstrap.
 - `--youtube-url`: YouTube URL to extract audio from (requires yt-dlp or youtube-dl); if set, extracts audio and exits.
 - `--output-dir`: Directory where the generated WAV or extracted audio will be saved.
 - `--device`: Force a device (`cpu`, `cuda`, or `mps`); auto-detected if omitted.

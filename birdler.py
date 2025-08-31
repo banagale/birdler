@@ -87,6 +87,16 @@ def parse_args():
         default=1.1,
         help="Penalty to discourage repetition in generation",
     )
+    parser.add_argument(
+        "--bootstrap-only",
+        action="store_true",
+        help="Only set up the managed voice (download/copy + cache embedding), then exit",
+    )
+    parser.add_argument(
+        "--force-voice-ref",
+        action="store_true",
+        help="Overwrite an existing voices/<voice>/samples/reference.wav during bootstrap",
+    )
     group2 = parser.add_mutually_exclusive_group()
     group2.add_argument(
         "--text-file",
@@ -367,7 +377,7 @@ def main():
     print(f"Using device: {device}")
 
     # YouTube extraction
-    if args.youtube_url:
+    if args.youtube_url and not args.voice:
         ytdlp_cmd = which("yt-dlp") or which("youtube-dl")
         if not ytdlp_cmd:
             print("Error: yt-dlp or youtube-dl is required to extract audio; please install one of them")
@@ -381,6 +391,29 @@ def main():
         )
         print("Done.")
         return 0
+    elif args.youtube_url and args.voice:
+        # Voice-aware bootstrap using YouTube audio directly into reference.wav
+        vp = _voice_paths(args.voice, args.voice_dir)
+        vp["samples"].mkdir(parents=True, exist_ok=True)
+        ref = vp["ref_wav"]
+        if ref.exists() and not args.force_voice_ref:
+            print(f"[voice] reference.wav exists; keeping: {ref} (use --force-voice-ref to overwrite)")
+        else:
+            if ref.exists() and args.force_voice_ref:
+                try:
+                    ref.unlink()
+                except OSError:
+                    pass
+            ytdlp_cmd = which("yt-dlp") or which("youtube-dl")
+            if not ytdlp_cmd:
+                print("Error: yt-dlp or youtube-dl is required to extract audio; please install one of them")
+                return 1
+            out_template = vp["samples"] / "reference.%(ext)s"
+            print(f"[voice] Extracting reference audio for '{args.voice}' → {ref}")
+            subprocess.run(
+                [ytdlp_cmd, "--extract-audio", "--audio-format", "wav", "-o", str(out_template), args.youtube_url],
+                check=True,
+            )
 
     # TTS generation
     if not args.voice:
@@ -416,6 +449,10 @@ def main():
     if audio_prompt_cond is None:
         print("Error: TTS backend must support get_audio_conditioning and audio_prompt_cond")
         return 1
+
+    if args.bootstrap_only:
+        print(f"[voice] Bootstrap complete for '{args.voice}' (embedding cached).")
+        return 0
 
     def _generate_with_prompt(text: str):
         return tts.generate(
