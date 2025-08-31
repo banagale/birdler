@@ -15,7 +15,11 @@ import time
 import re
 from pathlib import Path
 from shutil import which
-from dotenv import load_dotenv; load_dotenv()
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
 
 
 def parse_args():
@@ -29,6 +33,18 @@ def parse_args():
         type=Path,
         default=Path("audio-samples/bigbird/bigbird_youtube_clean.wav"),
         help="Path to the clean reference audio sample",
+    )
+    # Voice-based workflow (can be combined with --audio-sample on first run)
+    parser.add_argument(
+        "--voice",
+        type=str,
+        help="Name of the voice to use (creates/uses voices/<name> directory)",
+    )
+    parser.add_argument(
+        "--voice-dir",
+        type=Path,
+        default=Path("voices"),
+        help="Root directory for managed voice data (default: voices)",
     )
     group.add_argument(
         "--youtube-url",
@@ -219,6 +235,77 @@ def _derive_outname(args, text_chunks) -> str:
     return f"{sample_slug}_{text_slug}_{ts}.wav"
 
 
+def _voice_paths(voice: str, voices_root: Path) -> dict:
+    root = voices_root / voice
+    samples = root / "samples"
+    embedding = root / "embedding"
+    ref_wav = samples / "reference.wav"
+    emb_path = embedding / "cond.pt"
+    return {
+        "root": root,
+        "samples": samples,
+        "embedding": embedding,
+        "ref_wav": ref_wav,
+        "emb_path": emb_path,
+    }
+
+
+def prepare_voice(args) -> dict | None:
+    """
+    Ensure voice directories exist. If a reference wav is provided and missing, copy it.
+    Returns a dict of paths when args.voice is set; otherwise None.
+    """
+    if not getattr(args, "voice", None):
+        # Back-compat: warn if using legacy audio-sample without voice
+        if getattr(args, "audio_sample", None):
+            print("[warn] Using --audio-sample without --voice; consider --voice for caching.")
+        return None
+
+    vp = _voice_paths(args.voice, args.voice_dir)
+    vp["samples"].mkdir(parents=True, exist_ok=True)
+    vp["embedding"].mkdir(parents=True, exist_ok=True)
+
+    # Bootstrap reference.wav on first run if provided
+    if not vp["ref_wav"].exists() and getattr(args, "audio_sample", None):
+        src = args.audio_sample
+        if src and src.exists():
+            from shutil import copy2
+
+            copy2(src, vp["ref_wav"])
+            print(f"[voice] Bootstrapped reference: {vp['ref_wav']}")
+        else:
+            print("[warn] --voice specified but no valid --audio-sample to bootstrap reference.wav")
+    return vp
+
+
+def get_or_build_embedding(tts, voice_paths: dict):
+    """
+    Load cached embedding if present; otherwise build via tts.get_audio_conditioning and cache.
+    Returns None if API is unavailable.
+    """
+    emb_path: Path = voice_paths["emb_path"]
+    ref_wav: Path = voice_paths["ref_wav"]
+    try:
+        import torch  # noqa: F401
+    except Exception:
+        return None
+    try:
+        import torch
+        if emb_path.exists():
+            return torch.load(emb_path)
+        if hasattr(tts, "get_audio_conditioning") and ref_wav.exists():
+            cond = tts.get_audio_conditioning(str(ref_wav))
+            try:
+                torch.save(cond, emb_path)
+                print(f"[voice] Cached embedding: {emb_path}")
+            except Exception:
+                print("[warn] Failed to cache embedding; continuing without cache")
+            return cond
+    except Exception as e:
+        print(f"[warn] Embedding build/load failed: {e}")
+    return None
+
+
 def main():
     args = parse_args()
     device = select_device(args.device)
@@ -241,8 +328,14 @@ def main():
         return 0
 
     # TTS generation
-    if not args.audio_sample or not args.audio_sample.exists():
-        print(f"Error: audio sample not found: {args.audio_sample}")
+    voice_paths = prepare_voice(args)
+    ref_path = None
+    if voice_paths:
+        ref_path = voice_paths["ref_wav"] if voice_paths["ref_wav"].exists() else None
+    # Legacy path if no voice setup
+    legacy_path = args.audio_sample if getattr(args, "audio_sample", None) else None
+    if not ref_path and not (legacy_path and legacy_path.exists()):
+        print(f"Error: no valid reference audio. Provide --voice with a bootstrapping --audio-sample, or a valid --audio-sample path. Current: {legacy_path}")
         return 1
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -306,20 +399,43 @@ def main():
 
     tts = ChatterboxTTS.from_pretrained(device=device)
 
+    # Prepare cached embedding when using voice workflow
+    audio_prompt_cond = None
+    if voice_paths:
+        audio_prompt_cond = get_or_build_embedding(tts, voice_paths)
+
+    def _generate_with_prompt(text: str):
+        # Prefer embedding if available
+        if audio_prompt_cond is not None:
+            try:
+                return tts.generate(
+                    text,
+                    audio_prompt_cond=audio_prompt_cond,
+                    cfg_weight=args.cfg_weight,
+                    exaggeration=args.exaggeration,
+                    temperature=args.temperature,
+                    repetition_penalty=args.repetition_penalty,
+                )
+            except TypeError:
+                print("[warn] TTS backend does not accept audio_prompt_cond; falling back to audio_prompt_path")
+        # Fallback: use path (voice ref if exists; else legacy sample)
+        path = ref_path if ref_path is not None and ref_path.exists() else legacy_path
+        return tts.generate(
+            text,
+            audio_prompt_path=str(path),
+            cfg_weight=args.cfg_weight,
+            exaggeration=args.exaggeration,
+            temperature=args.temperature,
+            repetition_penalty=args.repetition_penalty,
+        )
+
     audio_chunks = []
     for i, chunk in enumerate(text_chunks, 1):
         # Preview remaining chunks starting from the second
         if i > 1:
             preview = chunk[:30].replace("\n", " ")
             print(f"Chunk {i}/{len(text_chunks)}: '{preview}...'")
-        wav = tts.generate(
-            chunk,
-            audio_prompt_path=str(args.audio_sample),
-            cfg_weight=args.cfg_weight,
-            exaggeration=args.exaggeration,
-            temperature=args.temperature,
-            repetition_penalty=args.repetition_penalty,
-        )
+        wav = _generate_with_prompt(chunk)
         # float [-1, 1], [C, T]
         if not hasattr(wav, "dim"):
             # Some APIs might return numpy; convert if needed
