@@ -337,14 +337,23 @@ def prepare_voice(args) -> dict | None:
     vp["samples"].mkdir(parents=True, exist_ok=True)
     vp["embedding"].mkdir(parents=True, exist_ok=True)
 
-    # Bootstrap reference.wav on first run if provided
-    if not vp["ref_wav"].exists() and getattr(args, "audio_sample", None):
-        src = args.audio_sample
+    # Bootstrap or overwrite reference.wav from provided sample
+    src = getattr(args, "audio_sample", None)
+    ref = vp["ref_wav"]
+    if ref.exists():
+        if getattr(args, "force_voice_ref", False) and src and src.exists():
+            from shutil import copy2
+            copy2(src, ref)
+            print(f"[voice] Overwrote existing reference: {ref}")
+        else:
+            print(f"[voice] reference.wav exists; keeping: {ref}")
+    else:
         if src and src.exists():
             from shutil import copy2
-
-            copy2(src, vp["ref_wav"])
-            print(f"[voice] Bootstrapped reference: {vp['ref_wav']}")
+            copy2(src, ref)
+            print(f"[voice] Bootstrapped reference: {ref}")
+        elif src and not src.exists():
+            print(f"Error: provided --audio-sample not found: {src}")
     return vp
 
 
