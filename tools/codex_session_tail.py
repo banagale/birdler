@@ -35,6 +35,8 @@ def find_latest_session_log() -> Optional[Path]:
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Tail Codex TUI session JSONL and print assistant messages (optionally speak via Birdler)")
+    p.add_argument("-P", "--preset", type=str, help="Preset name to collapse typical flags; maps to --voice and tuned defaults")
+    p.add_argument("--persona", type=str, help="Alias for --preset")
     p.add_argument("--file", type=Path, help="Path to Codex session JSONL (defaults to latest in ~/.codex/log)")
     p.add_argument("--from-start", action="store_true", help="Read from start instead of tailing new lines only")
     p.add_argument("--sleep", type=float, default=0.2, help="Polling interval seconds for new lines")
@@ -81,6 +83,65 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--cooldown", type=float, default=0.0, help="Optional pause (seconds) after each spoken item")
     p.add_argument("--speak-headlines", action="store_true", help="If a message is long, speak only key section headlines (e.g., 'What changed', 'How to use')")
     return p.parse_args()
+
+
+def _select_device(preferred: Optional[str] = None) -> str:
+    if preferred:
+        return preferred
+    try:
+        import torch  # noqa: F401
+    except Exception:
+        return "cpu"
+    import torch as _t, sys as _s
+    try:
+        is_macos = (_s.platform == "darwin")
+    except Exception:
+        is_macos = False
+    if is_macos and getattr(_t.backends, "mps", None) and _t.backends.mps.is_available():
+        return "mps"
+    if _t.cuda.is_available():
+        return "cuda"
+    if getattr(_t.backends, "mps", None) and _t.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
+def _apply_preset(args: argparse.Namespace) -> None:
+    # Map persona alias to preset if provided
+    if getattr(args, "persona", None) and not getattr(args, "preset", None):
+        args.preset = args.persona
+    if not getattr(args, "preset", None):
+        return
+    # Voice defaults to preset name if unset
+    if not getattr(args, "voice", None):
+        args.voice = args.preset
+    # Turn on common behavior
+    args.speak = True
+    args.play = True
+    args.fast = True
+    # Tuned caps unless already set by user
+    if getattr(args, "speak_first_sentences", 0) == 0:
+        args.speak_first_sentences = 1
+    if getattr(args, "speak_max_chars", 0) in (0, None):
+        args.speak_max_chars = 200
+    if getattr(args, "min_speak_chars", 12) == 12:
+        args.min_speak_chars = 24
+    if getattr(args, "max_backlog", 4) == 4:
+        args.max_backlog = 3
+    if getattr(args, "cooldown", 0.0) == 0.0:
+        args.cooldown = 0.2
+    # Prefer a good device if not specified
+    if not getattr(args, "device", None):
+        args.device = _select_device(None)
+
+
+def _voice_assets_exist(voice: Optional[str], root: Path = Path("voices")) -> bool:
+    if not voice:
+        return False
+    base = root / voice
+    ref = base / "samples" / "reference.wav"
+    emb = base / "embedding" / "cond.pt"
+    return ref.exists() or emb.exists()
 
 
 ALLOW_RE = re.compile(r"(?i)\b(want me to|shall i|should i|do you want me|would you like me)\b")
@@ -290,7 +351,11 @@ def strip_codeblocks(text: str) -> str:
     return t
 
 
-HEADLINE_RE = re.compile(r"\b(what changed|how to use|usage|notes|summary|next steps|recommend(?:ed)? run|quick start)\b", re.I)
+# Expanded headline detection patterns common in our replies
+HEADLINE_RE = re.compile(
+    r"\b(what(?:'|’)s new|what changed|how to run|how to use|usage|notes|summary|next steps|ideas|about|why this is faster|recommend(?:ed)? run|quick start|quick commands)\b",
+    re.I,
+)
 
 
 def extract_headlines(text: str) -> str:
@@ -309,8 +374,52 @@ def extract_headlines(text: str) -> str:
     return ""
 
 
+def extract_bullet_leads(text: str, max_items: int = 3) -> str:
+    """Extract up to max_items bullet lead phrases from the text.
+    Recognizes '-', '*', '•', and numbered bullets like '1.' or '1)'.
+    Returns a short sentence joined by '. '."""
+    lines = [ln.rstrip() for ln in (text or "").splitlines()]
+    bullets: list[str] = []
+    for ln in lines:
+        s = ln.strip()
+        if not s:
+            continue
+        if re.match(r"^[-*•]\s+", s):
+            item = re.sub(r"^[-*•]\s+", "", s)
+        elif re.match(r"^\d+[\.)]\s+", s):
+            item = re.sub(r"^\d+[\.)]\s+", "", s)
+        else:
+            continue
+        # Keep it concise: first ~12 words
+        words = item.split()
+        if not words:
+            continue
+        short = " ".join(words[:12])
+        short = re.sub(r"\s+", " ", short).strip(" -–—:,")
+        if short:
+            bullets.append(short)
+        if len(bullets) >= max_items:
+            break
+    if bullets:
+        return ". ".join(bullets) + "."
+    return ""
+
+
 def main() -> int:
     args = parse_args()
+    _apply_preset(args)
+    # Fast-mode implied defaults: only apply if user left defaults
+    if args.fast:
+        if getattr(args, "speak_first_sentences", 0) == 0:
+            args.speak_first_sentences = 1
+        if getattr(args, "speak_max_chars", 0) in (0, None):
+            args.speak_max_chars = 200
+        if getattr(args, "min_speak_chars", 12) == 12:
+            args.min_speak_chars = 24
+        if getattr(args, "max_backlog", 4) == 4:
+            args.max_backlog = 3
+        if getattr(args, "cooldown", 0.0) == 0.0:
+            args.cooldown = 0.2
     log_path: Optional[Path] = args.file
     if log_path is None:
         log_path = find_latest_session_log()
@@ -357,14 +466,50 @@ def main() -> int:
         nonlocal server_proc
         if server_proc is not None:
             return
+        # Preflight: warn once if voice assets are missing
+        if args.voice and not _voice_assets_exist(args.voice):
+            try:
+                print(f"[warn] voice '{args.voice}' is missing reference.wav and embedding; run birdler.py to bootstrap.", file=sys.stderr)
+            except Exception:
+                pass
         cmd = [sys.executable, "tools/birdler_server.py"]
         if args.device:
             cmd += ["--device", args.device]
         cmd += ["--voice-dir", str(Path("voices"))]
         cmd += ["--no-crossfade"]
-        server_proc = _sp.Popen(cmd, stdin=_sp.PIPE, stdout=_sp.PIPE, stderr=_sp.DEVNULL, text=True, bufsize=1)
+        # If targeting MPS and user cares about GPU-only, enable strict mode
+        if args.device == "mps":
+            cmd += ["--strict-device"]
+        if args.verbose_status:
+            cmd += ["--verbose"]
+        server_proc = _sp.Popen(
+            cmd,
+            stdin=_sp.PIPE,
+            stdout=_sp.PIPE,
+            stderr=(None if args.verbose_status else _sp.DEVNULL),
+            text=True,
+            bufsize=1,
+        )
+        # Send a warmup request to eliminate first-hit latency (best-effort)
+        try:
+            if args.voice and server_proc and server_proc.stdin and server_proc.stdout:
+                warm = {"kind": "warmup", "voice": args.voice}
+                server_proc.stdin.write(json.dumps(warm) + "\n")
+                server_proc.stdin.flush()
+                # read and ignore response with a short timeout behavior
+                start = time.time()
+                while True:
+                    if (time.time() - start) > 2.0:
+                        break
+                    if server_proc.stdout and server_proc.stdout.readable():
+                        line = server_proc.stdout.readline()
+                        if line:
+                            break
+                    time.sleep(0.05)
+        except Exception:
+            pass
 
-    def server_say(text: str) -> Optional[Path]:
+    def server_say(text: str) -> tuple[Optional[Path], Optional[str]]:
         assert server_proc and server_proc.stdin and server_proc.stdout
         req = {"kind": "speak", "text": text, "voice": args.voice, "out_dir": str(args.output_dir), "no_crossfade": True}
         try:
@@ -372,12 +517,32 @@ def main() -> int:
             server_proc.stdin.flush()
             line = server_proc.stdout.readline()
             if not line:
-                return None
+                return None, "no-response"
             res = json.loads(line)
             if res.get("ok") and res.get("path"):
-                return Path(res["path"])  # type: ignore[arg-type]
+                return Path(res["path"]) , None  # type: ignore[arg-type]
+            return None, str(res.get("error") or "unknown-error")
+        except Exception as e:
+            return None, f"exception:{type(e).__name__}"
+
+    def server_shutdown() -> None:
+        nonlocal server_proc
+        if not server_proc or not server_proc.stdin:
+            return
+        try:
+            req = {"kind": "shutdown"}
+            server_proc.stdin.write(json.dumps(req) + "\n")
+            server_proc.stdin.flush()
         except Exception:
-            return None
+            pass
+        # give it a moment to exit cleanly
+        try:
+            server_proc.wait(timeout=1.5)
+        except Exception:
+            try:
+                server_proc.kill()
+            except Exception:
+                pass
         return None
 
     def _speech_worker():
@@ -416,7 +581,7 @@ def main() -> int:
                     if args.fast:
                         if server_proc is None:
                             server_start()
-                        wav_path = server_say(item)
+                        wav_path, err = server_say(item)
                         rc = 0 if wav_path else 1
                     else:
                         rc, wav_path = speak_with_birdler(item, args.voice, cache_path.parent, args.atempo)
@@ -439,8 +604,16 @@ def main() -> int:
                 if args.fast:
                     if server_proc is None:
                         server_start()
-                    wav_path = server_say(item)
+                    # Attempt with one automatic server restart on protocol failure
+                    wav_path, err = server_say(item)
                     rc = 0 if wav_path else 1
+                    if rc != 0 and err in ("no-response", "unknown-error"):
+                        # restart and retry once
+                        server_shutdown()
+                        server_proc = None
+                        server_start()
+                        wav_path, err = server_say(item)
+                        rc = 0 if wav_path else 1
                 else:
                     rc, wav_path = speak_with_birdler(item, args.voice, args.output_dir, args.atempo)
                 if rc == 0 and args.play and wav_path and wav_path.exists():
@@ -449,7 +622,12 @@ def main() -> int:
                         status["last"] = "play"
                 else:
                     with status_lock:
-                        status["last"] = f"rc={rc}"
+                        status["last"] = (f"err:{err}" if args.fast and rc != 0 else f"rc={rc}")
+                    if args.fast and rc != 0:
+                        try:
+                            print(f"\n[error] server synth failed: {err}", file=sys.stderr)
+                        except Exception:
+                            pass
                 if args.cooldown > 0:
                     time.sleep(args.cooldown)
             except Exception:
@@ -489,6 +667,14 @@ def main() -> int:
         ticker = Thread(target=_status_ticker, name="status-ticker", daemon=True)
         ticker.start()
 
+    # In fast mode, spin up the server immediately so the banner/config prints
+    # and the first synth has no cold start.
+    if args.fast:
+        try:
+            server_start()
+        except Exception:
+            pass
+
     try:
         for raw in follow(log_path, args.from_start, args.sleep):
             line = raw.strip()
@@ -520,6 +706,9 @@ def main() -> int:
                     tts_text = ""
                     if args.speak_headlines:
                         tts_text = extract_headlines(processed_text)
+                        if not tts_text:
+                            # Fallback to bullet leads if present
+                            tts_text = extract_bullet_leads(processed_text)
                     # Fallback to first sentences if no headlines were found
                     if not tts_text:
                         tts_text = limit_for_speech(processed_text, args.speak_max_chars, args.speak_first_sentences)
@@ -547,10 +736,7 @@ def main() -> int:
             worker.join(timeout=1.5)
         # Stop server
         if server_proc is not None:
-            try:
-                server_proc.kill()
-            except Exception:
-                pass
+            server_shutdown()
         if ticker is not None:
             try:
                 sys.stderr.write("\n")
