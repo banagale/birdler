@@ -40,6 +40,22 @@ export CODEX_TUI_RECORD_SESSION
 mkdir -p "$(dirname "$CODEX_TUI_SESSION_LOG_PATH")"
 echo "[codex] Recording session events to: $CODEX_TUI_SESSION_LOG_PATH" >&2
 
+# Pretty interstitial banner for Birdler + Codex
+show_banner() {
+  cat <<'EOF'
+==============================================
+||               BIRDLER LAUNCHER           ||
+==============================================
+EOF
+  echo
+  echo "[hint] In another terminal, tail + speak fast:"
+  echo "  poetry run python tools/codex_session_tail.py --file ~/.codex/log/ \\
+        --speak --play --fast --voice ripley --speak-headlines \\
+        --speak-first-sentences 1 --speak-max-chars 200 --min-speak-chars 24 \\
+        --max-backlog 3 --cooldown 0.2"
+  echo
+}
+
 # If no args provided, default to launching the TUI
 if [[ ${#pass_args[@]} -eq 0 ]]; then
   pass_args=(codex)
@@ -61,7 +77,8 @@ fi
 # Pause to let user read the info line(s) before TUI clears the screen,
 # unless disabled via -y/--no-pause or when stdin is not a TTY.
 if ! $no_pause && [ -t 0 ]; then
-  read -r -p "[codex] Press Enter to launch…" _
+  show_banner
+  read -r -p "[codex] Press Enter to launch Codex…" _
 fi
 
 exec "${pass_args[@]}"
